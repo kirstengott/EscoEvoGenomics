@@ -15,10 +15,10 @@ shorten_genus_species <- function(x){
   paste0(strsplit(spl[[1]][1], split = "")[[1]][1], '. ', spl[[1]][2])
 }
 
-metadata <- read_csv('metadata.csv') %>%
+metadata <- read_csv('../metadata.csv') %>%
   mutate(acc_red = sub("\\..*$", "", acc)) %>%
   group_by(genus_species) %>%
-  mutate(label = ifelse(is.na(Agriculture), 
+  mutate(label = ifelse(is.na(Agriculture),
                             yes = shorten_genus_species(genus_species),
                             no = genus_species)) %>%
   ungroup()
@@ -75,34 +75,6 @@ ggplot(ani_df, aes(x = g1, y = g2, fill = ave_ani)) +
   ggsave('ani_tile.pdf', dpi = 320, width = 8, height = 10, units = 'in')
 
 
-ani_df %>% filter(g2 == 'ICBG2049', g1 == 'ICBG736') 
-
-## clades and members with high identity
-
-## 1
-## ICBG742, NIGB, LGSR, NQYS
-
-##2
-## NQYR, NIGC, NQYQ
-
-## 3
-## 1096, 733, 751
-
-
-## ragoo the genomes of anything that is >99% identical
-filter(ani_df, ave_ani_sig >= 98)
-
-
-#aln_lens <- read_tsv('qc/ANIvis.tsv')
-#seq_lens <- read_tsv('qc/fasta_lengths.txt', col_names = c('Reference', 'Reference_Length'))
-
-
-#all_len <- left_join(aln_lens, seq_lens, by = 'Reference')
-
-
-## look for things that align over a large length of sequence
-#all_len %>% mutate(perc_aligned = (QueryAligned/Reference_Length)*100) %>%
-#  filter(perc_aligned > 70)
 
 
 
