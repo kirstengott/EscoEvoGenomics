@@ -16,8 +16,9 @@ get_cluster <- function(x){
   paste0(spliter[1], ":", cluster)
 }
 
-files <- list.files(".", pattern = 'summary$', recursive = TRUE)
+files <- list.files("parsed_networks", pattern = 'network', recursive = TRUE, full.names = TRUE)
 
+## pull in the parsed component network files from bigscape output
 all_files <- lapply(files, function(x){
   table <- read_tsv(x, col_names = c('component', 'bigscape')) %>%
     left_join(., metadata, by = 'bigscape') %>%
@@ -25,16 +26,14 @@ all_files <- lapply(files, function(x){
     mutate(num_agricultures = length(unique(Agriculture))) %>%
     ungroup() %>%
     filter(num_agricultures > 1)
-  write_csv(table, path = paste0(x, '_parsed.csv'))
+  #write_csv(table, path = paste0(x, '_parsed.csv'))
   table
 })
 
 names(all_files) <- files
 
-
- #x <- names(all_files)[1]
- #y <- unique(table$component)[1]
-#
+#x <- names(all_files)[1]
+#y <- unique(table$component)[1]
 
 lapply(names(all_files), function(x){
   table <- all_files[[x]]
@@ -44,7 +43,7 @@ lapply(names(all_files), function(x){
     sub <- table %>% filter(., component == y) %>%
       group_by(bigscape) %>%
       mutate(antismash = sub(pattern = paste0(acc, "_"), replacement = "", x = bigscape)) %>%
-      mutate(antismash_filename = paste0('antismash4/', acc, '/', antismash, '.gbk')) %>%
+      mutate(antismash_filename = paste0('antismash4/gff3/', acc, '_', antismash, '.gff3')) %>%
       mutate(antismash_filename = sub('ASM430301v1_genomic_', '', antismash_filename)) %>%
       ungroup()
     known_BGC <- sub[which(grepl('BGC', sub$bigscape)), ] %>% .$bigscape
@@ -58,17 +57,19 @@ lapply(names(all_files), function(x){
     outfile = paste0('bigscape_gff3/', unique(sub$component), "_", sub(" ", "", Sys.time()), ".gff3")
     file.remove(outfile)
 
-    print(fi_a)
-    lapply(fi_a, function(x){
-      dir <- dirname(x)
-      base = basename(dir)
-      gene_file <- paste0(dir, '/geneclusters.txt')
-      command = paste0('~/scripts/antismash2gff3.py ', x, " ", gene_file," ",  base, " >>", outfile)
-      system(command)
-    })
+    lapply(fi_a, function(x){file.append(file2 = x, file1 = outfile)})
+
+    # print(fi_a)
+    # lapply(fi_a, function(x){
+    #   dir <- dirname(x)
+    #   base = basename(dir)
+    #   gene_file <- paste0(dir, '/geneclusters.txt')
+    #   command = paste0('~/scripts/antismash2gff3.py ', x, " ", gene_file," ",  base, " >>", outfile)
+    #   #write(command, file = 'commands.sh', append = TRUE)
+    # })
 
 
-    plot_out <- paste0(dirname(x), "/", y, ".pdf")
+    plot_out <- paste0('BGC/', basename(x), "_", y, ".pdf")
     cluster_used = fi_a %>% map(., get_cluster) %>% unlist()
     l_out = ceiling(ifelse(length(cluster_used) <= 10, yes = 3, no = length(cluster_used)/5))
     chuncks <- seq(from = 1, to = length(cluster_used), length.out = l_out)
@@ -93,9 +94,11 @@ lapply(names(all_files), function(x){
 })
 
 
+files <- list.files("parsed_networks", pattern = 'network', recursive = TRUE, full.names = TRUE)
 
 all_files <- lapply(files, function(x){
-  table <- read_tsv(x, col_names = c('component', 'bigscape')) %>% left_join(., metadata, by = 'bigscape') %>%
+  table <- read_tsv(x, col_names = c('component', 'bigscape')) %>%
+    left_join(., metadata, by = 'bigscape') %>%
     group_by(component) %>%
     mutate(num_agricultures = length(unique(Agriculture))) %>%
     ungroup()
@@ -112,58 +115,59 @@ all_data <- lapply(files, function(x){
                               yes = 'Outgroup',
                               no = Agriculture)) %>%
   filter(!is.na(acc),
-         num_agricultures > 1,
+         num_agricultures > 0,
          acc != 'g1.txt') %>%
   select(component, BGC_type, acc, Presence)
 
 
-#tree_order <- scan('~/Desktop/tree_order.txt', what = 'character')
+tree_order <- unique(metadata$tree_order)
 
 
 
 
-annotation_row = data.frame(
-  "Agriculture" = m[rownames(nrps), ],
-  row.names = rownames(nrps)
-)
-ann_colors = list(
-  'Agriculture' = c(Leafcutter = 'green4', Lower = 'yellow', Coral = 'magenta3', Higher = 'blue3', 'NA' = 'white')
-)
 
-lapply(unique(all_data$BGC_type), function(x){
-  ## per genome, presence absence across all
-  print(x)
-  nrps <- all_data %>% filter(BGC_type == x) %>%
-    distinct() %>%
-    spread(component, Presence) %>%
-    select(-BGC_type) %>%
-    data.frame()
 
-  rownames(nrps) <- nrps$acc
-  nrps$acc <- NULL
-  nrps <- as.matrix(nrps)
-  nrps[is.na(nrps)] <- 0
-
-  rows_order <- tree_order[which(tree_order %in% rownames(nrps))]
-
-  m <- metadata %>% select(Agriculture, acc) %>% distinct() %>% data.frame()
-  rownames(m) <- m$acc
-  m$acc <- NULL
-
-  pheatmap::pheatmap(nrps[rows_order,],
-                     #        breaks = breaks,
-                     legend = FALSE,
-                     color = c('grey87', 'black'),
-                     cluster_rows = FALSE,
-                     cluster_cols = TRUE,
-                     border_color = "grey70",
-                     cellwidth = 10,
-                     cellheight = 10,
-                     annotation_row = annotation_row,
-                     annotation_colors = ann_colors,
-                     main = x,
-                     filename = paste0('composite_', x, '.pdf'))
-})
+# lapply(unique(all_data$BGC_type), function(x){
+#   ## per genome, presence absence across all
+#   print(x)
+#   nrps <- all_data %>% filter(BGC_type == x) %>%
+#     distinct() %>%
+#     spread(component, Presence) %>%
+#     select(-BGC_type) %>%
+#     data.frame()
+#
+#   rownames(nrps) <- nrps$acc
+#   nrps$acc <- NULL
+#   nrps <- as.matrix(nrps)
+#   nrps[is.na(nrps)] <- 0
+#
+#   rows_order <- tree_order[which(tree_order %in% rownames(nrps))]
+#
+#   m <- metadata %>% select(Agriculture, acc) %>% distinct() %>% data.frame()
+#   rownames(m) <- m$acc
+#   m$acc <- NULL
+#
+#   annotation_row = data.frame(
+#     "Agriculture" = m[rownames(nrps), ],
+#     row.names = rownames(nrps)
+#   )
+#   ann_colors = list(
+#     'Agriculture' = c(Leafcutter = 'green4', Lower = 'yellow', Coral = 'magenta3', Higher = 'blue3', 'NA' = 'white')
+#   )
+#   pheatmap::pheatmap(nrps[rows_order,],
+#                      #        breaks = breaks,
+#                      legend = FALSE,
+#                      color = c('grey87', 'black'),
+#                      cluster_rows = FALSE,
+#                      cluster_cols = TRUE,
+#                      border_color = "grey70",
+#                      cellwidth = 10,
+#                      cellheight = 10,
+#                      annotation_row = annotation_row,
+#                      annotation_colors = ann_colors,
+#                      main = x,
+#                      filename = paste0('composite_', x, '.pdf'))
+# })
 
 
 
