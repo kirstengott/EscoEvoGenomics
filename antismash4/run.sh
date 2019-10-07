@@ -1,2 +1,0 @@
-for i in `ls db/*fa | sed -e "s/.fa//"`; do base=`basename $i`; antismash -c 5 --taxon fungi --cassis --full-hmmer --smcogs --subclusterblast --knownclusterblast --outputfolder ${base} --gff3 ${i}.genemodels_modified.gff ${i}.fa; done
-for i in `ls ~/hypocreaceae/gff | cut -d _ -f 1,2`;  do antismash -c 20 --taxon fungi --cassis --full-hmmer --smcogs --subclusterblast --knownclusterblast --outputfolder ${i} --gff3 ~/hypocreaceae/gff/*${i}* ~/hypocreaceae/dna/*${i}*; done
