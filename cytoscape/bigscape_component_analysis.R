@@ -57,17 +57,8 @@ lapply(names(all_files), function(x){
     outfile = paste0('bigscape_gff3/', unique(sub$component), "_", sub(" ", "", Sys.time()), ".gff3")
     file.remove(outfile)
 
+    ## combine the gff3 files from the parsed networks
     lapply(fi_a, function(x){file.append(file2 = x, file1 = outfile)})
-
-    # print(fi_a)
-    # lapply(fi_a, function(x){
-    #   dir <- dirname(x)
-    #   base = basename(dir)
-    #   gene_file <- paste0(dir, '/geneclusters.txt')
-    #   command = paste0('~/scripts/antismash2gff3.py ', x, " ", gene_file," ",  base, " >>", outfile)
-    #   #write(command, file = 'commands.sh', append = TRUE)
-    # })
-
 
     plot_out <- paste0('BGC/', basename(x), "_", y, ".pdf")
     cluster_used = fi_a %>% map(., get_cluster) %>% unlist()
