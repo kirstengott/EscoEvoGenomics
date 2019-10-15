@@ -5,28 +5,28 @@ library(tidyverse)
 library(ggfortify)
 
 cazy_files <- list.files('cazy', full.names = TRUE)
-c <- cazy_files[1]
-
-cazy <- lapply(cazy_files, function(c){
-  read_tsv(c) %>%
-    summarize(NumCazy = length(unique(`Gene ID`)))  %>%
-    mutate(genome = sub(".txt", "", basename(c)))
-}) %>% bind_rows() %>% as.data.frame()
-
+# c <- cazy_files[1]
+# 
+# cazy <- lapply(cazy_files, function(c){
+#   read_tsv(c) %>%
+#     summarize(NumCazy = length(unique(`Gene ID`)))  %>%
+#     mutate(genome = sub(".txt", "", basename(c)))
+# }) %>% bind_rows() %>% as.data.frame()
+# 
 metadata <- read_csv('../metadata.csv') %>%
   mutate(acc_red = sub("\\..*$", "", acc))
 
-cazy$genome <- factor(cazy$genome, levels = rev(metadata$acc_red))
-## cazy
-cazy %>% ggplot(., aes(y = NumCazy, x = genome)) +
-  geom_col() +
-  theme_kirsten(rot = 90) + coord_flip() +
-  ggsave('cazy.pdf')
+# cazy$genome <- factor(cazy$genome, levels = rev(metadata$acc_red))
+# ## cazy
+# cazy %>% ggplot(., aes(y = NumCazy, x = genus_species)) +
+#   geom_col() +
+#   theme_kirsten(rot = 90) + coord_flip() +
+#   ggsave('cazy.pdf')
 
 
-rownames(cazy) <- cazy$genome
+#rownames(cazy) <- cazy$genome
 
-cazy[metadata$acc_red, 'NumCazy', drop = FALSE]
+#cazy[metadata$acc_red, 'NumCazy', drop = FALSE]
 
 
 
