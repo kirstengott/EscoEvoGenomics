@@ -13,7 +13,7 @@ munge_gca <- function(x){
 metadata <- read_csv('metadata.csv')
 meta_levels <- metadata$genus_species
 
-## dive in deeper to presence absence output 
+## dive in deeper to presence absence output
 ant_ag <- na.omit(unique(metadata$Agriculture))
 
 
@@ -25,9 +25,9 @@ all_data <- lapply(files, function(x){
     mutate(BGC_type = sub("_.*$", "", basename(x)))
 }) %>% bind_rows() %>%
   group_by(bigscape) %>%
-  mutate(acc = ifelse(grepl('GCA', bigscape), 
+  mutate(acc = ifelse(grepl('GCA', bigscape),
                            yes = munge_gca(bigscape),
-                           no = ifelse(grepl('SPDT', bigscape), 
+                           no = ifelse(grepl('SPDT', bigscape),
                                        yes = paste(strsplit(bigscape, split = "\\.")[[1]][c(1,2)], collapse = "."),
                                          no = sub("_.*$", "", bigscape)))) %>%
   ungroup() %>%
@@ -38,11 +38,11 @@ all_data <- lapply(files, function(x){
   filter(!is.na(acc)) %>%
   mutate(Agriculture = ifelse(is.na(Agriculture),
                               yes = 'Outgroup',
-                              no = Agriculture)) %>% 
+                              no = Agriculture)) %>%
   ungroup() %>%
   group_by(BGC_type, component) %>%
-  mutate(bgc_plot_label = ifelse(any(grepl('BGC', acc)), 
-                                 yes = paste(grep('BGC', acc, value = TRUE), collapse = ","), 
+  mutate(bgc_plot_label = ifelse(any(grepl('BGC', acc)),
+                                 yes = paste(grep('BGC', acc, value = TRUE), collapse = ","),
                                  no = paste0(BGC_type, "_", component))) %>%
   ungroup()
 
@@ -58,15 +58,15 @@ all_data <- lapply(files, function(x){
 
 ann_colors = list(
   'BGC_type' = c(NRPS = '#1B9E77', PKSI = '#D95F02', Terpene = '#7570B3', Others = "#E7298A", PKS.NRP = "#66A61E"),
-  'Agriculture' = c(Leafcutter = 'green4', Lower = 'yellow', Coral = 'magenta3', Higher = 'blue3', 'NA' = 'white')
+  'Agriculture' = c(Leafcutter = 'green4', Lower = 'yellow', Coral = 'magenta3', Higher = 'blue3', Outgroup = 'white')
 )
 
 
 
 
 all_bgc <- all_data %>%
-  filter(!BGC_type %in% c('PKSother', 'mix'), 
-         num_agricultures > 0, 
+  filter(!BGC_type %in% c('PKSother', 'mix'),
+         num_agricultures > 0,
          !grepl('BGC', acc)) %>% ## only look at BGC that are in at least 1 ant agriculture
   select(bgc_plot_label, genus_species, Presence, BGC_type) %>%
   mutate(bgc_plot_label = sub('-', '.', bgc_plot_label)) %>%
@@ -84,17 +84,19 @@ all_bgc_s$genus_species <- NULL
 all_bgc_s <- as.matrix(all_bgc_s)
 all_bgc_s[is.na(all_bgc_s)] <- 0
 
+## rows are genomes
 rows_order <- meta_levels[which(meta_levels %in% rownames(all_bgc_s))]
 
-m <- metadata %>% select(Agriculture, genus_species) %>% distinct() %>% data.frame()
+m <- metadata %>% select(Agriculture, genus_species) %>%  mutate(Agriculture = replace_na(Agriculture, 'Outgroup')) %>%
+  distinct() %>% data.frame()
 rownames(m) <- m$genus_species
 m$genus_species <- NULL
 
 
 
-annotation_col <- all_bgc %>% 
-  select(-genus_species, -Presence) %>% 
-  filter(bgc_plot_label %in% colnames(all_bgc_s)) %>% 
+annotation_col <- all_bgc %>%
+  select(-genus_species, -Presence) %>%
+  filter(bgc_plot_label %in% colnames(all_bgc_s)) %>%
   distinct() %>%
   data.frame()
 
@@ -132,7 +134,7 @@ pheatmap::pheatmap(all_bgc_s[rows_order,],
 ## Ordinate all BGCs
 
 all_bgc <- all_data %>%
-  filter(!BGC_type %in% c('mix'), 
+  filter(!BGC_type %in% c('mix'),
          !grepl('BGC', acc)) %>% ## only look at BGC that are in at least 1 ant agriculture
   select(bgc_plot_label, genus_species, Presence, BGC_type) %>%
   mutate(bgc_plot_label = sub('-', '.', bgc_plot_label)) %>%
@@ -153,22 +155,20 @@ all_bgc_s[is.na(all_bgc_s)] <- 0
 
 pca_data <- prcomp(all_bgc_s)
 
-
 eigs <- pca_data$sdev^2
 proportion = (eigs/sum(eigs))*100
 head(proportion)
 cumulative = cumsum(eigs)/sum(eigs)
-## look at this
-#head(pca_data$x)
 screeplot(pca_data)
 
 
+n_k <- length(which(proportion >= 10))
+
 ## nmds
 ## bray curtis distance is more resilient to nulls
-example_NMDS=metaMDS(all_bgc_s, # Our community-by-species matrix
-                     k=3) # The number of reduced dimensions ## components with >10% variance explained
+example_NMDS=metaMDS(all_bgc_s, k = n_k) # The number of reduced dimensions ## components with >10% variance explained
 
-stressplot(example_NMDS) 
+stressplot(example_NMDS)
 
 
 treat = replace_na(annotation_row[,'Agriculture'], replace = 'Outgroup') ## corresponds to rows/communities (genomes)
@@ -180,32 +180,24 @@ ano_test <- anosim(bgc_dist, grouping = treat)
 summary(ano_test)
 plot(ano_test)
 
-ggord(example_NMDS, grp_in = treat, arrow = NULL, obslab = FALSE, 
-      txt = FALSE, 
-      poly=FALSE, size=2) + theme_classic() + 
-  labs(title = 'BGCs stratify by ant agriculture', 
-       subtitle = paste('Pval:', ano_test$signif, ", R:", round(ano_test$statistic, digits = 2)),
-       caption = 'All BGCs were ordinated, regardless of presence in ant agriculture')
-
-
-## re-encode as numeric to run adonis?
-metadata_s <- data.frame(metadata, stringsAsFactors = FALSE)
-rownames(metadata_s) <- metadata$genus_species
-
-all_bgc_a <- cbind(all_bgc_s, metadata_s[rownames(all_bgc_s), ])
-
-adonis(bgc_dist ~ Agriculture, data=all_bgc_a, permutations=99)
+ggord(example_NMDS, grp_in = treat, arrow = NULL, obslab = FALSE,
+      txt = FALSE,
+      poly=FALSE, size=2) + theme_classic() +
+  labs(title = 'BGCs stratify by ant agriculture',
+       subtitle = paste('Pval:', ano_test$signif, ", R:", round(ano_test$statistic, digits = 2))) +
+  ggsave('BGC_all_ord.pdf')
 
 
 
 
-## make the heatmap for the 'mix' analysis
+
+## Make the same plots for the 'mix' analysis
 
 
 
 all_bgc <- all_data %>%
-  filter(BGC_type %in% c('mix'), 
-         num_agricultures > 0, 
+  filter(BGC_type %in% c('mix'),
+         num_agricultures > 0,
          !grepl('BGC', acc)) %>% ## only look at BGC that are in at least 1 ant agriculture
   select(bgc_plot_label, genus_species, Presence, BGC_type) %>%
   mutate(bgc_plot_label = sub('-', '.', bgc_plot_label))
@@ -224,7 +216,8 @@ all_bgc_s[is.na(all_bgc_s)] <- 0
 
 rows_order <- meta_levels[which(meta_levels %in% rownames(all_bgc_s))]
 
-m <- metadata %>% select(Agriculture, genus_species) %>% distinct() %>% data.frame()
+m <- metadata %>% select(Agriculture, genus_species) %>% mutate(Agriculture = replace_na(Agriculture, 'Outgroup')) %>%
+  distinct() %>% data.frame()
 rownames(m) <- m$genus_species
 m$genus_species <- NULL
 
@@ -248,6 +241,61 @@ pheatmap::pheatmap(all_bgc_s[rows_order,],
                    annotation_colors = ann_colors,
                    main = "Mixed components present in at least one ant agriculture",
                    filename = paste0('all_BGC_components_mix.pdf'))
+## Ordinate all BGCs
 
+all_bgc <- all_data %>%
+  filter(BGC_type %in% c('mix'),
+         !grepl('BGC', acc)) %>% ## only look at BGC that are in at least 1 ant agriculture
+  select(bgc_plot_label, genus_species, Presence, BGC_type) %>%
+  mutate(bgc_plot_label = sub('-', '.', bgc_plot_label)) %>%
+  mutate(BGC_type = sub('-', '.', BGC_type))
+
+#all_bgc %>% filter(component == 'component_111', BGC_type == 'mix') %>% View()
+
+all_bgc_s <- all_bgc %>% select(-BGC_type) %>%
+  distinct() %>%
+  spread(bgc_plot_label, Presence) %>%
+  data.frame()
+
+rownames(all_bgc_s) <- all_bgc_s$genus_species
+all_bgc_s$genus_species <- NULL
+all_bgc_s <- as.matrix(all_bgc_s)
+all_bgc_s[is.na(all_bgc_s)] <- 0
+
+
+pca_data <- prcomp(all_bgc_s)
+
+
+eigs <- pca_data$sdev^2
+proportion <- (eigs/sum(eigs))*100
+head(proportion)
+cumulative <- cumsum(eigs)/sum(eigs)
+screeplot(pca_data)
+
+
+n_k <- length(which(proportion >= 10))
+
+## nmds
+## bray curtis distance is more resilient to nulls
+example_NMDS=metaMDS(all_bgc_s, k = n_k) # The number of reduced dimensions ## components with >10% variance explained
+
+stressplot(example_NMDS)
+
+
+treat = replace_na(annotation_row[,'Agriculture'], replace = 'Outgroup') ## corresponds to rows/communities (genomes)
+
+
+## test for significance
+bgc_dist <- vegdist(all_bgc_s)
+ano_test <- anosim(bgc_dist, grouping = treat)
+summary(ano_test)
+plot(ano_test)
+
+ggord(example_NMDS, grp_in = treat, arrow = NULL, obslab = FALSE,
+      txt = FALSE,
+      poly=FALSE, size=2) + theme_classic() +
+  labs(title = 'BGCs stratify by ant agriculture',
+       subtitle = paste('Pval:', ano_test$signif, ", R:", round(ano_test$statistic, digits = 2))) +
+  ggsave('BGC_mix_ord.pdf')
 
 
