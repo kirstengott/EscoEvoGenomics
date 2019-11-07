@@ -10,7 +10,7 @@ munge_gca <- function(x){
 
 
 
-metadata <- read_csv('metadata.csv')
+metadata <- read_csv('tables/metadata.csv')
 meta_levels <- metadata$genus_species
 
 ## dive in deeper to presence absence output
@@ -18,7 +18,7 @@ ant_ag <- na.omit(unique(metadata$Agriculture))
 
 
 
-files <- list.files("parsed_networks", pattern = 'network', recursive = TRUE, full.names = TRUE)
+files <- list.files("bigscape/parsed_networks", pattern = 'network', recursive = TRUE, full.names = TRUE)
 
 all_data <- lapply(files, function(x){
   table <- read_tsv(x, col_names = c('component', 'bigscape')) %>%
@@ -60,8 +60,6 @@ ann_colors = list(
   'BGC_type' = c(NRPS = '#1B9E77', PKSI = '#D95F02', Terpene = '#7570B3', Others = "#E7298A", PKS.NRP = "#66A61E"),
   'Agriculture' = c(Leafcutter = 'green4', Lower = 'yellow', Coral = 'magenta3', Higher = 'blue3', Outgroup = 'white')
 )
-
-
 
 
 all_bgc <- all_data %>%
@@ -122,7 +120,7 @@ pheatmap::pheatmap(all_bgc_s[rows_order,],
                    annotation_col = annotation_col,
                    annotation_colors = ann_colors,
                    main = "Components present in at least one ant agriculture",
-                   filename = paste0('all_BGC_components.pdf'))
+                   filename = paste0('plots/all_BGC_components_heatmap.pdf'))
 
 
 
@@ -185,7 +183,7 @@ ggord(example_NMDS, grp_in = treat, arrow = NULL, obslab = FALSE,
       poly=FALSE, size=2) + theme_classic() +
   labs(title = 'BGCs stratify by ant agriculture',
        subtitle = paste('Pval:', ano_test$signif, ", R:", round(ano_test$statistic, digits = 2))) +
-  ggsave('BGC_all_ord.pdf')
+  ggsave('plots/BGC_all_ord.pdf')
 
 
 
@@ -240,7 +238,7 @@ pheatmap::pheatmap(all_bgc_s[rows_order,],
                    annotation_row = annotation_row,
                    annotation_colors = ann_colors,
                    main = "Mixed components present in at least one ant agriculture",
-                   filename = paste0('all_BGC_components_mix.pdf'))
+                   filename = paste0('plots/all_BGC_components_mix_heatmap.pdf'))
 ## Ordinate all BGCs
 
 all_bgc <- all_data %>%
@@ -296,6 +294,6 @@ ggord(example_NMDS, grp_in = treat, arrow = NULL, obslab = FALSE,
       poly=FALSE, size=2) + theme_classic() +
   labs(title = 'BGCs stratify by ant agriculture',
        subtitle = paste('Pval:', ano_test$signif, ", R:", round(ano_test$statistic, digits = 2))) +
-  ggsave('BGC_mix_ord.pdf')
+  ggsave('plots/BGC_mix_ord.pdf')
 
 
