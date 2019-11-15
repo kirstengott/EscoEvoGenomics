@@ -7,21 +7,29 @@ munge_gca <- function(x){
   paste(strsplit(x, split = "_")[[1]][c(1,2)], collapse = "_")
 }
 
-card_files <- list.files('card', full.names = TRUE)
+card_files <- list.files('annotation/card', full.names = TRUE)
 
 card <- lapply(card_files, function(x){
   read_tsv(x) %>%
     rename('Resistance_Mechanism' = `Resistance Mechanism`) %>%
-    select(ORF_ID, Resistance_Mechanism) %>%
-    group_by(Resistance_Mechanism) %>%
-    summarize(n_genes = length(unique(ORF_ID))) %>%
     mutate(genome = ifelse(grepl('GCA', x), yes = munge_gca(basename(x)),
                            no = sub("\\..*$", "", basename(x))))
 }) %>% bind_rows()
 
-card_mat <- card %>% filter(n_genes >= 10) %>%
+write_csv(card, path = 'tables/card_annotation.csv')
 
+
+
+
+card_mat <- card %>% 
+  group_by(genome, Resistance_Mechanism) %>%
+  select(ORF_ID, Resistance_Mechanism) %>%
+  summarize(n_genes = length(unique(ORF_ID))) %>%
+  filter(n_genes >= 10) %>%
+  ungroup() %>%
   spread(Resistance_Mechanism, n_genes) %>% as.data.frame()
+
+
 rownames(card_mat) <- card_mat$genome
 card_mat$genome <- NULL
 card_mat <- as.matrix(card_mat)

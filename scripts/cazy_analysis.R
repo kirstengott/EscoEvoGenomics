@@ -60,6 +60,11 @@ cazy <- lapply(cazy_files, function(c){
   rename('acc' = genome) %>%
   left_join(., metadata, by = 'acc')
 
+
+write_csv(cazy, path = 'tables/cazy_annotation.csv')
+
+
+
 c_sum <- cazy %>%
   select(-start, -stop, -gene) %>%
   select(-cazy_base, -cazy_description, -Agriculture, -acc) %>%
