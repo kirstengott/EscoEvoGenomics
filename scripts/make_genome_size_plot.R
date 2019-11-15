@@ -43,8 +43,7 @@ find_seq_error <- function(vector_nmer){
 
 library(tidyverse, verbose = FALSE, quietly = TRUE)
 
-#args <- c('jellyfish/new_output/PE1_31mer.histo', 'test', 'pe3')
-#args <- c("jellyfish/hist/1054.histo", 'test', '1054')
+#args <- c("tables/jellyfish_histograms/1054.histo")
 
 x <- read_delim(args[1], col_names = c('Coverage', 'Nmers'), delim = ' ') %>%
                     mutate(name = sub(".histo", "", basename(args[1])))
@@ -78,10 +77,10 @@ y_max    <- (x_filt %>% filter(Nmers == max(Nmers)) %>% .$Nmers) + 1000
 
 
 ## size of the single copy region of the genome
-single_copy_region <- round((sum(x_filt$Coverage*x_filt$Nmers)/peak_cov)/1000000, digits = 2)
+single_copy_region <- round((sum(x_filt$Coverage*x_filt$Nmers)/peak_cov), digits = 2)
 
 ## total genome size
-total_genome_size <- round((sum(as.numeric(x[index_error_end:nrow(x),1, drop = TRUE]*x[index_error_end:nrow(x),2, drop = TRUE]))/peak_cov)/1000000, digits = 2)
+total_genome_size <- round((sum(as.numeric(x[index_error_end:nrow(x),1, drop = TRUE]*x[index_error_end:nrow(x),2, drop = TRUE]))/peak_cov), digits = 2)
 
 
 
@@ -91,13 +90,16 @@ ggplot(x, aes(x = Coverage, y = Nmers)) +
   scale_x_continuous(breaks = seq(0, 200, by = 10), labels = seq(0, 200, by = 10),
                      limits = c(0, 200))+
   ylim(0, y_max) +
-  theme_kirsten(angle=0) +
+  theme_bw() +
   labs(title = plot_title,
        subtitle = paste('Estimated Genome Size:', total_genome_size),
-       caption = paste('Peak Coverage:', peak_cov)) +
+       caption = paste('Single copy region size:', single_copy_region)) +
   ggsave(device = 'pdf', filename = paste0(basename(args[1]), ".pdf"))
 
 
 
-
 write(x = paste(basename(args[1]), total_genome_size, single_copy_region, sep = "\t"), file = 'genome_sizes.txt', append = TRUE)
+
+if(peak_cov <= 20){
+  write(paste(args[1], peak_cov, sep = "\t"), file = 'flagged.txt', append = TRUE)
+}
