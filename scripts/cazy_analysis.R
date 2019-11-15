@@ -13,7 +13,7 @@ cazy_files <- list.files('annotation/cazy', full.names = TRUE)
 #     mutate(genome = sub(".txt", "", basename(c)))
 # }) %>% bind_rows() %>% as.data.frame()
 #
-metadata <- read_csv('metadata.csv') %>%
+metadata <- read_csv('tables/metadata.csv') %>%
   mutate(acc = sub("\\..*$", "", acc)) %>%
   select(acc, genus_species, Agriculture)
 
@@ -119,13 +119,13 @@ summary(ano_test)
 plot(ano_test)
 
 ggord(example_NMDS,
-      grp_in = new_treat,
+      grp_in = treat,
       arrow = NULL, ## draw the arrows
       obslab = FALSE,
       txt = FALSE,## labeling the ordination
       poly=FALSE, size=2) + theme_classic() +
   labs(subtitle = paste('Pval:', ano_test$signif, ", R:", round(ano_test$statistic, digits = 2))) +
-  ggsave('cazy_ord_all.pdf')
+  ggsave('plots/cazy_ord_all.pdf')
 
 
 
@@ -141,6 +141,15 @@ ano_test <- anosim(bgc_dist, grouping = new_treat)
 summary(ano_test)
 plot(ano_test)
 
+ggord(example_NMDS,
+      grp_in = new_treat,
+      arrow = NULL, ## draw the arrows
+      obslab = FALSE,
+      txt = FALSE,## labeling the ordination
+      poly=FALSE, size=2) + theme_classic() +
+  labs(subtitle = paste('Pval:', ano_test$signif, ", R:", round(ano_test$statistic, digits = 2))) +
+  ggsave('plots/cazy_ord_sub.pdf')
+
 ##TODO
 ## make a table with comparisons of: compare higher to leafcutter and higher to lower/coral/outgroup
 
@@ -151,8 +160,8 @@ plot(ano_test)
 nmds_table <- data.frame(example_NMDS$species, stringsAsFactors = FALSE)
 nmds_table$cazy_base <- rownames(nmds_table)
 
-nmds_table %>% left_join(., fam_db, by = 'cazy_base') %>%
-  write_tsv(., path = 'cazy_nmds_table.tsv')
+# nmds_table %>% left_join(., fam_db, by = 'cazy_base') %>%
+#   write_tsv(., path = 'cazy_nmds_table.tsv')
 
 
 #pca_data <- prcomp(c_heat)
