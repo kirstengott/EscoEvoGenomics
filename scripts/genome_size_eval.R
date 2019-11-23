@@ -30,8 +30,17 @@ gs_summary <- lapply(gs_files, function(x){
              skip = 3) %>%
     mutate(genome = dirname(x)) %>%
     select(-X4) ## strip the empty column
-}) %>% bind_rows()
+}) %>% bind_rows() %>%
+  mutate(mean = (min+max)/2)
  
+
+gs_summary %>%
+  filter(property %in% c('GenomeHaploidLength', 'GenomeRepeatLength')) %>%
+  ggplot(aes(y = mean, x = genome, fill = property)) +
+    geom_col()
+
+
+
 
 
 gs_summary %>% filter(property == 'ModelFit') %>% View()

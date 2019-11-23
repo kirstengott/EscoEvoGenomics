@@ -18,18 +18,21 @@ ant_ag <- na.omit(unique(metadata$Agriculture))
 
 
 
-files <- list.files("bigscape/parsed_networks", pattern = 'network', recursive = TRUE, full.names = TRUE)
+files <- list.files("bigscape/parsed_networks", 
+                    pattern = 'network', 
+                    recursive = TRUE, 
+                    full.names = TRUE)
 
 all_data <- lapply(files, function(x){
   table <- read_tsv(x, col_names = c('component', 'bigscape')) %>%
     mutate(BGC_type = sub("_.*$", "", basename(x)))
 }) %>% bind_rows() %>%
   group_by(bigscape) %>%
-  mutate(acc = ifelse(grepl('GCA', bigscape),
-                           yes = munge_gca(bigscape),
-                           no = ifelse(grepl('SPDT', bigscape),
-                                       yes = paste(strsplit(bigscape, split = "\\.")[[1]][c(1,2)], collapse = "."),
-                                         no = sub("_.*$", "", bigscape)))) %>%
+  mutate(acc = case_when(
+    grepl('GCA', bigscape) ~ munge_gca(bigscape),
+    grepl('SPDT', bigscape) ~ paste(strsplit(bigscape, split = "\\.")[[1]][c(1,2)], collapse = "."),
+    TRUE ~ sub("_.*$", "", bigscape)
+  )) %>%
   ungroup() %>%
   left_join(., metadata, by = 'acc') %>%
   mutate(Presence = 1) %>%
@@ -45,6 +48,7 @@ all_data <- lapply(files, function(x){
                                  yes = paste(grep('BGC', acc, value = TRUE), collapse = ","),
                                  no = paste0(BGC_type, "_", component))) %>%
   ungroup()
+
 
 #View(select(all_data, component, Agriculture, bigscape, num_agricultures, BGC_type))
 
@@ -111,7 +115,7 @@ annotation_row = data.frame(
 pheatmap::pheatmap(all_bgc_s[rows_order,],
                    legend = FALSE,
                    color = c('grey87', 'black'),
-                   cluster_rows = FALSE,
+                   cluster_rows = TRUE,
                    cluster_cols = TRUE,
                    border_color = "grey70",
                    cellwidth = 10,
@@ -121,11 +125,6 @@ pheatmap::pheatmap(all_bgc_s[rows_order,],
                    annotation_colors = ann_colors,
                    main = "Components present in at least one ant agriculture",
                    filename = paste0('plots/all_BGC_components_heatmap.pdf'))
-
-
-
-
-
 
 
 
@@ -230,7 +229,7 @@ annotation_row = data.frame(
 pheatmap::pheatmap(all_bgc_s[rows_order,],
                    legend = FALSE,
                    color = c('grey87', 'black'),
-                   cluster_rows = FALSE,
+                   cluster_rows = TRUE,
                    cluster_cols = TRUE,
                    border_color = "grey70",
                    cellwidth = 10,
