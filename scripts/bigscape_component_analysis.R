@@ -74,7 +74,12 @@ all_bgc <- all_data %>%
   mutate(bgc_plot_label = sub('-', '.', bgc_plot_label)) %>%
   mutate(BGC_type = sub('-', '.', BGC_type))
 
-#all_bgc %>% filter(component == 'component_111', BGC_type == 'mix') %>% View()
+
+
+all_data %>% filter(num_agricultures >= 3, !BGC_type %in% c('mix')) %>%
+  select(component, BGC_type) %>%
+  distinct() %>%
+  write_tsv(., path = 'tables/bgc_greater_than_2_ags.txt')
 
 all_bgc_s <- all_bgc %>% select(-BGC_type) %>%
   distinct() %>%
