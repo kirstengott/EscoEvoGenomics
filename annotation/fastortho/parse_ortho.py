@@ -10,6 +10,16 @@ ortho = open(sys.argv[1], 'r')
 ## initialize a dictionary of dictionaries to store the orthologous terms
 ## I want to use this style of dictionary because I want to order one of my output tables by the column
 
+## if supplied a directory containing files of repeat annotated genes
+## haven't finished this implementation
+if sys.argv[2]:
+    repeat_files = os.listdir(sys.argv[2])
+    repeats = [os.path.join(sys.argv[2], x) for x in repeat_files]
+    rep_genes = []
+    for rep in repeats:
+        r = open(rep, 'r')
+        [rep_genes.append(x.strip()) for x in r]
+
 
 ortho_dict = {}
 
@@ -18,7 +28,6 @@ wide_matrix = open('orthologues_presence_absence.csv', 'w')
 prot_dir = 'proteins'
 
 unique_genomes = []
-
 
 def subset_fasta(file_in, file_out, sequences):
     f_o = open(file_out, 'a')
@@ -33,6 +42,7 @@ def subset_fasta(file_in, file_out, sequences):
 
 
 
+## each line of the fastortho file is the ortholog followed by a list of genes and genomes
 for line in ortho:
     line = line.strip().split(':')
     ortho_group = line[0].split(' ')[0]
@@ -40,7 +50,7 @@ for line in ortho:
     ortho_dict[ortho_group] = {}
     for g in genes_list:
         gs = g.split("(")
-        gene = gs[0]
+        gene = gs[0] 
         genome = re.sub("\)", "", gs[1])
         if genome not in unique_genomes:
             unique_genomes.append(genome)
