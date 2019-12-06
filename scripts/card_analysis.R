@@ -96,7 +96,7 @@ annotation_col <- filter(card, ID %in% colnames(card_mat)) %>%
 
 
 card_mat[is.na(card_mat)] <- 0
-breaks <- unique(quantile(card_mat))
+breaks <- seq(1, 10)
 colors <- colorRampPalette(brewer.pal(n = 7, name ="Blues"))(length(breaks))
 
 
@@ -118,12 +118,40 @@ pheatmap(card_mat[metadata$acc,],
          cellwidth = 20,
          cellheight = 20,
          annotation_row = annotation_row,
-         annotation_col = annotation_col,
+         #annotation_col = annotation_col,
          annotation_colors = ann_colors,
          show_colnames = FALSE,
          color = colors, filename = 'plots/card_heat_all_orf.pdf')
 
 
+
+pheatmap(card_mat[metadata$acc,],
+         breaks = breaks,
+         cluster_rows = TRUE,
+         cluster_cols = TRUE,
+         cellwidth = 20,
+         cellheight = 20,
+         annotation_row = annotation_row,
+         #annotation_col = annotation_col,
+         annotation_colors = ann_colors,
+         show_colnames = FALSE,
+         color = colors, filename = 'plots/card_heat_all_orf_rows_clustered.pdf')
+
+
+card_mat <- card %>%
+  group_by(genome, ID) %>%
+  summarize(n_genes = length(unique(ORF_ID))) %>%
+  ungroup() %>%
+  group_by(ID) %>%
+  mutate(tot_genes = sum(n_genes)) %>%
+  mutate(tot_genomes = length(unique(genome))) %>%
+  ungroup() %>%
+  select(-tot_genes, -tot_genomes) %>%
+  spread(ID, n_genes) %>% 
+  column_to_rownames(var = 'genome') %>%
+  as.matrix()
+
+card_mat[is.na(card_mat)] <- 0 
 
 
 
@@ -136,46 +164,75 @@ cumulative = cumsum(eigs)/sum(eigs)
 screeplot(pca_data)
 
 
+
+
+treat <- metadata[which(metadata$acc %in%rownames(card_mat)), 'Agriculture', drop = TRUE]
+treat <- replace_na(treat, replace = 'Outgroup') ## corresponds to rows/communities (genomes)
+
+
+
+ggord(pca_data,
+      grp_in = treat,
+      arrow = NULL, ## draw the arrows
+      obslab = FALSE,
+      txt = FALSE,## labeling the ordination
+      poly=FALSE, 
+      size=2) + theme_classic() +
+  ggsave('plots/card_ord_all.pdf')
+
+## there's really only one component that explains the data
+
+pheatmap(card_sub,
+         breaks = breaks,
+         cluster_rows = TRUE,
+         cluster_cols = TRUE,
+         cellwidth = 20,
+         cellheight = 20,
+         annotation_row = annotation_row,
+         annotation_col = annotation_col,
+         annotation_colors = ann_colors,
+         show_colnames = FALSE,
+         color = colors, filename = 'plots/card_heat_atta_acro.pdf')
+
+
+
+  
+  
+  
+## the groups alone were not significant, so I want to look at
+
+
+
+keep <- filter(metadata, Host %in% c('Acromyrmex', 'Atta')) %>% .$acc
+
+card_sub <- card_mat[keep, ]
+card_sub <- card_sub[, colSums(card_sub) > 0]
+
+pca_data <- prcomp(card_sub)
+
+eigs <- pca_data$sdev^2
+proportion = (eigs/sum(eigs))*100
+head(proportion)
+cumulative = cumsum(eigs)/sum(eigs)
+screeplot(pca_data)
+
+
+
+treat <- metadata[which(metadata$acc %in%rownames(card_sub)), 'Host', drop = TRUE]
+treat <- replace_na(treat, replace = 'Outgroup') ## corresponds to rows/communities (genomes)
+
+
+ggord(pca_data,
+      grp_in = treat) + theme_classic() 
+  
+
+
 n_k <- length(which(proportion >= 10))
 
 if(n_k < 2){
   n_k = 2
 }
 
-## nmds
-## bray curtis distance is more resilient to nulls
-example_NMDS=metaMDS(card_mat, k = n_k) # The number of reduced dimensions ## components with >10% variance explained
-stressplot(example_NMDS)
-
-treat <- metadata[which(metadata$acc %in%rownames(card_mat)), 'Agriculture', drop = TRUE]
-treat <- replace_na(treat, replace = 'Outgroup') ## corresponds to rows/communities (genomes)
-
-## test for significance
-dist <- vegdist(card_mat)
-ano_test <- anosim(dist, grouping = treat)
-summary(ano_test)
-plot(ano_test)
-
-## If found no statistical difference amongst agricultural groups
-## 
-
-ggord(example_NMDS,
-      grp_in = treat,
-      arrow = NULL, ## draw the arrows
-      obslab = FALSE,
-      txt = FALSE,## labeling the ordination
-      poly=FALSE, size=2) + theme_classic() +
-  labs(subtitle = paste('Pval:', ano_test$signif, ", R:", round(ano_test$statistic, digits = 2))) +
-  ggsave('plots/card_ord_all.pdf')
-
-  
-  
-  
-  
-  
-  
-  
-  
-  
+##TOD  
   
 

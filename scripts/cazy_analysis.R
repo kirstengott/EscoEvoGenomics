@@ -3,32 +3,13 @@ library(pheatmap)
 library(RColorBrewer)
 library(tidyverse)
 library(ggfortify)
+library(vegan)
+library(ggord)
 
 cazy_files <- list.files('annotation/cazy', full.names = TRUE)
-# c <- cazy_files[1]
-#
-# cazy <- lapply(cazy_files, function(c){
-#   read_tsv(c) %>%
-#     summarize(NumCazy = length(unique(`Gene ID`)))  %>%
-#     mutate(genome = sub(".txt", "", basename(c)))
-# }) %>% bind_rows() %>% as.data.frame()
-#
 metadata <- read_csv('tables/metadata.csv') %>%
   mutate(acc = sub("\\..*$", "", acc)) %>%
   select(acc, genus_species, Agriculture)
-
-# cazy$genome <- factor(cazy$genome, levels = rev(metadata$acc_red))
-# ## cazy
-# cazy %>% ggplot(., aes(y = NumCazy, x = genus_species)) +
-#   geom_col() +
-#   theme_kirsten(rot = 90) + coord_flip() +
-#   ggsave('cazy.pdf')
-
-
-#rownames(cazy) <- cazy$genome
-
-#cazy[metadata$acc_red, 'NumCazy', drop = FALSE]
-
 
 
 fam_db <- read_tsv('annotation/CAZyDB.07312018.fam-activities.txt', comment = '#', col_names = c('cazy_base', 'cazy_description'))
@@ -91,8 +72,7 @@ colors <- colorRampPalette(brewer.pal(n = 7, name ="Reds"))(11)
 #          cellheight = 10,
 #          filename = 'cazy_heat.pdf',
 #          color = colors)
-library(vegan)
-library(ggord)
+
 
 pca_data <- prcomp(c_heat)
 
@@ -155,15 +135,34 @@ ggord(example_NMDS,
   labs(subtitle = paste('Pval:', ano_test$signif, ", R:", round(ano_test$statistic, digits = 2))) +
   ggsave('plots/cazy_ord_sub.pdf')
 
+
+ggord(example_NMDS,
+      grp_in = new_treat,
+      #arrow = NULL, ## draw the arrows
+      #obslab = FALSE,
+      #txt = FALSE,## labeling the ordination
+      poly=FALSE, size=2) + 
+  theme_classic() +
+  scale_y_continuous(breaks = seq(-1, 0.5, length.out = 10), labels = seq(-1, 0.5, length.out = 10))
+  labs(subtitle = paste('Pval:', ano_test$signif, ", R:", round(ano_test$statistic, digits = 2)))
+
 ##TODO
 ## make a table with comparisons of: compare higher to leafcutter and higher to lower/coral/outgroup
 
 ## look at difference between lower/coral/outgroup and leafcutter/higher
 
 
-
 nmds_table <- data.frame(example_NMDS$species, stringsAsFactors = FALSE)
 nmds_table$cazy_base <- rownames(nmds_table)
+
+leafcutter_enrich <- nmds_table %>%
+  filter(MDS1 <= 0,
+         MDS2 >= -0.16) %>% .$cazy_base
+
+
+cazy[, c('genus_species', leafcutter_enrich)]
+  
+  
 
 # nmds_table %>% left_join(., fam_db, by = 'cazy_base') %>%
 #   write_tsv(., path = 'cazy_nmds_table.tsv')
