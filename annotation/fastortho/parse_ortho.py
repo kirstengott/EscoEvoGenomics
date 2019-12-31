@@ -12,13 +12,13 @@ ortho = open(sys.argv[1], 'r')
 
 ## if supplied a directory containing files of repeat annotated genes
 ## haven't finished this implementation
-if sys.argv[2]:
-    repeat_files = os.listdir(sys.argv[2])
-    repeats = [os.path.join(sys.argv[2], x) for x in repeat_files]
-    rep_genes = []
-    for rep in repeats:
-        r = open(rep, 'r')
-        [rep_genes.append(x.strip()) for x in r]
+# if sys.argv[2]:
+#     repeat_files = os.listdir(sys.argv[2])
+#     repeats = [os.path.join(sys.argv[2], x) for x in repeat_files]
+#     rep_genes = []
+#     for rep in repeats:
+#         r = open(rep, 'r')
+#         [rep_genes.append(x.strip()) for x in r]
 
 
 ortho_dict = {}
@@ -76,9 +76,13 @@ title_string = "OrthoGroup,{}\n".format(",".join(unique_genomes))
 n = 1
 
 
+#genome_name = ['seq' + str(x) for x in range(0, len(unique_genomes))]
+#genome_ids_out = dict(zip(unique_genomes, genome_name))
+
 if not os.path.exists('orthologue_fastas'):
     os.mkdir('orthologue_fastas')
 
+    
 for ortho in ortho_dict:
     if n == 1:
         wide_matrix.write(title_string)
@@ -92,13 +96,14 @@ for ortho in ortho_dict:
         os.remove(ortho_fasta)
     value_list = []
     for x in unique_genomes:
-        value_list.append(str(orth_d.get(x, 0)))
-        if x in orth_d.keys():
-            genes_list = orth_d[x][1]
-            fasta = os.path.join('proteins', genome_path_dict[x])
-            subset_fasta(file_in = fasta, file_out = ortho_fasta, sequences = genes_list)
-        else:
-            pass
+        if len(orth_d.keys()) > 3: ## only write out fasta's if there is more than 2 species represeted in the orthogroup
+            value_list.append(str(orth_d.get(x, 0)))
+            if x in orth_d.keys():
+                genes_list = orth_d[x][1]
+                fasta = os.path.join('proteins', genome_path_dict[x])
+                subset_fasta(file_in = fasta, file_out = ortho_fasta, sequences = genes_list)
+            else:
+                pass
     value_o = ",".join(value_list)
     output_string = "{},{}\n".format(ortho, value_o)
     wide_matrix.write(output_string)
