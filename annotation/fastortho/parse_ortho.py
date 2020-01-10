@@ -10,16 +10,6 @@ ortho = open(sys.argv[1], 'r')
 ## initialize a dictionary of dictionaries to store the orthologous terms
 ## I want to use this style of dictionary because I want to order one of my output tables by the column
 
-## if supplied a directory containing files of repeat annotated genes
-## haven't finished this implementation
-if sys.argv[2]:
-    repeat_files = os.listdir(sys.argv[2])
-    repeats = [os.path.join(sys.argv[2], x) for x in repeat_files]
-    rep_genes = []
-    for rep in repeats:
-        r = open(rep, 'r')
-        [rep_genes.append(x.strip()) for x in r]
-
 
 ortho_dict = {}
 
@@ -29,12 +19,13 @@ prot_dir = 'proteins'
 
 unique_genomes = []
 
-def subset_fasta(file_in, file_out, sequences):
+def subset_fasta(file_in, file_out, sequences, genome):
     f_o = open(file_out, 'a')
     fasta_file = pysam.FastxFile(file_in)
     for entry in fasta_file:
         if entry.name in sequences:
-            out = '>{0}\n{1}\n'.format(entry.name, entry.sequence)
+            fa_name = entry.name + "__" + genome
+            out = '>{0}\n{1}\n'.format(fa_name, entry.sequence)
             f_o.write(out)
         else:
             continue
@@ -96,7 +87,7 @@ for ortho in ortho_dict:
         if x in orth_d.keys():
             genes_list = orth_d[x][1]
             fasta = os.path.join('proteins', genome_path_dict[x])
-            subset_fasta(file_in = fasta, file_out = ortho_fasta, sequences = genes_list)
+            subset_fasta(file_in = fasta, file_out = ortho_fasta, sequences = genes_list, genome = x)
         else:
             pass
     value_o = ",".join(value_list)

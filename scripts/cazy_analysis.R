@@ -9,7 +9,7 @@ library(ggord)
 cazy_files <- list.files('annotation/cazy', full.names = TRUE)
 metadata <- read_csv('tables/metadata.csv') %>%
   mutate(acc = sub("\\..*$", "", acc)) %>%
-  select(acc, genus_species, Agriculture)
+  select(acc, genus_species, Agriculture, cazyme_groups)
 
 
 fam_db <- read_tsv('annotation/CAZyDB.07312018.fam-activities.txt', comment = '#', col_names = c('cazy_base', 'cazy_description'))
@@ -48,30 +48,35 @@ write_csv(cazy, path = 'tables/cazy_annotation.csv')
 
 c_sum <- cazy %>%
   select(-start, -stop, -gene) %>%
-  select(-cazy_base, -cazy_description, -Agriculture, -acc) %>%
+  select(-cazy_base, -cazy_description, -Agriculture, -acc, -genus_species) %>%
   distinct() %>%
-  spread(cazy, n_genes)
+  group_by(cazyme_groups, cazy) %>%
+  mutate(n_genes = mean(n_genes)) %>%
+  ungroup() %>%
+  distinct() %>%
+  spread(cazyme_groups, n_genes)
 
 c_heat <- c_sum  %>%
   data.frame()
 c_heat[is.na(c_heat)] <- 0
 
-rownames(c_heat) <- c_heat$genus_species
-c_heat$genus_species <- NULL
+rownames(c_heat) <- c_heat$cazy
+c_heat$cazy <- NULL
 
 
-#c_heat_f <- c_heat[which(rowSums(c_heat) > 20), ]
+c_heat_f <- c_heat[which(rowSums(c_heat) > 20), ]
 
-colors <- colorRampPalette(brewer.pal(n = 7, name ="Reds"))(11)
-## this heatmap isn't very helpful with too much data
-# pheatmap(as.matrix(c_heat),
-#          cluster_rows = TRUE,
-#          cluster_cols = TRUE,
-#          border_color = "grey70",
-#          cellwidth = 10,
-#          cellheight = 10,
-#          filename = 'cazy_heat.pdf',
-#          color = colors)
+colors <- colorRampPalette(brewer.pal(n = 7, name ="Blues"))(4)
+## think about taking rolling differences ?
+# this heatmap isn't very helpful with too much data
+pheatmap(as.matrix(c_heat),
+         cluster_rows = TRUE,
+         cluster_cols = TRUE,
+         border_color = "grey70",
+         cellwidth = 10,
+         cellheight = 10,
+         filename = 'cazy_heat.pdf',
+         color = colors)
 
 
 pca_data <- prcomp(c_heat)
@@ -89,33 +94,40 @@ if(n_k < 2){
   n_k = 2
 }
 
+
+
 ## nmds
 ## bray curtis distance is more resilient to nulls
 example_NMDS=metaMDS(c_heat, k = n_k) # The number of reduced dimensions ## components with >10% variance explained
 stressplot(example_NMDS)
 
-treat <- metadata[which(metadata$genus_species %in%rownames(c_heat)), 'Agriculture', drop = TRUE]
-treat <- replace_na(treat, replace = 'Outgroup') ## corresponds to rows/communities (genomes)
+
 
 ## test for significance
-bgc_dist <- vegdist(c_heat)
-ano_test <- anosim(bgc_dist, grouping = treat)
+c_dist <- vegdist(c_heat)
+
+treat <- metadata[sapply(labels(c_dist), function(x){grep(x, metadata$genus_species)}), 'Agriculture', drop = TRUE]
+treat <- replace_na(treat, replace = 'Outgroup') ## corresponds to rows/communities (genomes)
+
+ano_test <- anosim(c_dist, grouping = treat)
 summary(ano_test)
 plot(ano_test)
+
+
 
 ggord(example_NMDS,
       grp_in = treat,
       arrow = NULL, ## draw the arrows
-      obslab = FALSE,
+      obslab = TRUE,
       txt = FALSE,## labeling the ordination
-      poly=FALSE, size=2) + theme_classic() +
+      poly=FALSE, size=2,
+      ellipse = FALSE) + theme_classic() +
   labs(subtitle = paste('Pval:', ano_test$signif, ", R:", round(ano_test$statistic, digits = 2))) +
   ggsave('plots/cazy_ord_all.pdf')
 
 
-
 ## only compare leafcutter to the outgroup
-new_treat_ind <- which(!treat %in% c('Higher', 'Lower', 'Coral'))
+new_treat_ind <- which(treat %in% c('Higher', 'Coral', 'Lower', 'Leafcutter'))
 new_treat     <- treat[new_treat_ind]
 c_new         <- c_heat[new_treat_ind, ]
 
@@ -126,25 +138,18 @@ ano_test <- anosim(bgc_dist, grouping = new_treat)
 summary(ano_test)
 plot(ano_test)
 
+
 ggord(example_NMDS,
       grp_in = new_treat,
       arrow = NULL, ## draw the arrows
-      obslab = FALSE,
+      obslab = TRUE,
       txt = FALSE,## labeling the ordination
-      poly=FALSE, size=2) + theme_classic() +
+      poly=FALSE, 
+      size=2, 
+      ellipse = FALSE) + theme_classic() +
   labs(subtitle = paste('Pval:', ano_test$signif, ", R:", round(ano_test$statistic, digits = 2))) +
   ggsave('plots/cazy_ord_sub.pdf')
 
-
-ggord(example_NMDS,
-      grp_in = new_treat,
-      #arrow = NULL, ## draw the arrows
-      #obslab = FALSE,
-      #txt = FALSE,## labeling the ordination
-      poly=FALSE, size=2) + 
-  theme_classic() +
-  scale_y_continuous(breaks = seq(-1, 0.5, length.out = 10), labels = seq(-1, 0.5, length.out = 10))
-  labs(subtitle = paste('Pval:', ano_test$signif, ", R:", round(ano_test$statistic, digits = 2)))
 
 ##TODO
 ## make a table with comparisons of: compare higher to leafcutter and higher to lower/coral/outgroup
@@ -155,14 +160,6 @@ ggord(example_NMDS,
 nmds_table <- data.frame(example_NMDS$species, stringsAsFactors = FALSE)
 nmds_table$cazy_base <- rownames(nmds_table)
 
-leafcutter_enrich <- nmds_table %>%
-  filter(MDS1 <= 0,
-         MDS2 >= -0.16) %>% .$cazy_base
-
-
-cazy[, c('genus_species', leafcutter_enrich)]
-  
-  
 
 # nmds_table %>% left_join(., fam_db, by = 'cazy_base') %>%
 #   write_tsv(., path = 'cazy_nmds_table.tsv')
