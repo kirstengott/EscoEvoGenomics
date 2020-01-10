@@ -67,9 +67,13 @@ title_string = "OrthoGroup,{}\n".format(",".join(unique_genomes))
 n = 1
 
 
+#genome_name = ['seq' + str(x) for x in range(0, len(unique_genomes))]
+#genome_ids_out = dict(zip(unique_genomes, genome_name))
+
 if not os.path.exists('orthologue_fastas'):
     os.mkdir('orthologue_fastas')
 
+    
 for ortho in ortho_dict:
     if n == 1:
         wide_matrix.write(title_string)
