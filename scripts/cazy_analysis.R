@@ -116,7 +116,7 @@ ggplot(data2, aes(x = MDS1, y = MDS2, color = cazyme_groups1)) +
   labs(subtitle = paste('Pval:', ano_test$signif, ", R:", signif(ano_test$statistic, digits = 3))) +
   ggsave('plots/cazy_ord_all.pdf')
 
-all_escovopsis_caz_interest  <- filter(data1, MDS1 >= -0.1) %>% .$cazy_base
+#all_escovopsis_caz_interest  <- filter(data1, MDS1 >= -0.1) %>% .$cazy_base
 
 # ggord(example_NMDS,
 #       grp_in = treat,
@@ -163,6 +163,7 @@ data2 <- example_NMDS$points %>%
 
 data1_sub <- data1 %>% filter(!is.nan(MDS1), !is.nan(MDS2))
 
+## made by looking at the ordination with cazymes labeled
 data1_sub_keep <- filter(data1, MDS1 > 0.3 |
                            MDS2 < -0.25 |
                            MDS2 >= 0.25) %>% .$cazy_base
@@ -226,7 +227,6 @@ caz_interest <- cazy %>%
   distinct() %>%
   .$cazy
 
-
 c_sum <- cazy %>%
   select(-start, -stop, -gene) %>%
   select(-cazy_base, -cazy_description, -Agriculture, -acc, -contains('cazyme_groups')) %>%
@@ -260,7 +260,8 @@ pheatmap(as.matrix(t(c_sum)[metadata$genus_species, ]),
          filename = 'plots/cazy_heat.pdf',
          color = colors,
          display_numbers = TRUE,
-         number_format = "%.0f", annotation_row = annotation_row)
+         number_format = "%.0f",
+         annotation_row = annotation_row)
 
 
 
