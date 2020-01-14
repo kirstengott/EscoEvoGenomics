@@ -76,10 +76,13 @@ all_bgc <- all_data %>%
 
 
 
-all_data %>% filter(num_agricultures >= 3, !BGC_type %in% c('mix')) %>%
-  select(component, BGC_type) %>%
+all_data %>% filter(num_agricultures >= 3) %>%
   distinct() %>%
-  write_tsv(., path = 'tables/bgc_greater_than_2_ags.txt')
+  rowwise() %>%
+  mutate(file = grep(paste0(component, ".gff3"), list.files('bigscape/gff3', pattern = BGC_type, full.names = TRUE), value = TRUE)) %>%
+  select(file) %>%
+  distinct() %>%
+  write_tsv(., path = 'tables/bgc_greater_than_2_ags.txt', col_names = FALSE)
 
 all_bgc_s <- all_bgc %>% select(-BGC_type) %>%
   distinct() %>%
