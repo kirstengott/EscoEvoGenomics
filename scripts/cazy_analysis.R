@@ -31,23 +31,26 @@ cazy <- lapply(cazy_files, function(c){
   select(-tool, -cazy_id, -`#ofTools`) %>%
   unnest(cazy_id = strsplit(cazy_ids, ",")) %>%
   unnest(cazy = strsplit(cazy_id, "\\+")) %>%
-  select(gene, start, stop, genome, cazy) %>%
+  select(gene, genome, cazy) %>%
   distinct() %>%
+  filter(cazy != 'N') %>%
   mutate(cazy_base = sub("_.*$", "", cazy)) %>%
   left_join(., fam_db, by = 'cazy_base') %>%
-  filter(cazy != 'N') %>%
-  group_by(genome, cazy_base) %>%
+  group_by(genome, cazy) %>%
   mutate(n_genes = as.numeric(length(unique(gene)))) %>%
+  ungroup() %>%
+  group_by(genome, gene) %>%
+  mutate(n_cazy = as.numeric(length(unique(cazy)))) %>%
   ungroup() %>%
   rename('acc' = genome) %>%
   left_join(., metadata, by = 'acc') 
 
 
+
 write_csv(cazy, path = 'tables/cazy_annotation.csv')
 
 c_heat <- cazy %>%
-  select(-start, -stop, -gene) %>%
-  select(-cazy_base, -cazy_description, -Agriculture, -acc, -contains('cazyme_groups')) %>%
+  select(-gene, -n_cazy, -cazy_base, -cazy_description, -Agriculture, -acc, -contains('cazyme_groups')) %>%
   distinct() %>%
   spread(genus_species, n_genes) %>%
   data.frame()
@@ -208,8 +211,8 @@ ggplot(data2, aes(x = MDS1, y = MDS2, color = Agriculture)) +
 
 ## find interesting cazymes by groups
 caz_interest <- cazy %>%
-  select(-start, -stop, -gene) %>%
-  select(-cazy_base, -cazy_description, -Agriculture, -acc, -genus_species, -cazyme_groups1) %>%
+  select(-gene) %>%
+  select(-n_cazy, -cazy_base, -cazy_description, -Agriculture, -acc, -genus_species, -cazyme_groups1) %>%
   distinct() %>%
   group_by(cazyme_groups2, cazy) %>%
   mutate(n_genes = signif(mean(n_genes), digits =2)) %>%
@@ -228,7 +231,7 @@ caz_interest <- cazy %>%
   .$cazy
 
 c_sum <- cazy %>%
-  select(-start, -stop, -gene) %>%
+  select(-n_cazy, -gene) %>%
   select(-cazy_base, -cazy_description, -Agriculture, -acc, -contains('cazyme_groups')) %>%
   distinct() %>%
   spread(genus_species, n_genes) %>%
@@ -252,7 +255,7 @@ annotation_row = metadata %>% select(genus_species, cazyme_groups2) %>%
 
 pheatmap(as.matrix(t(c_sum)[metadata$genus_species, ]),
          cluster_rows = FALSE,
-         cluster_cols = TRUE,
+         cluster_cols = FALSE,
          breaks = breaks,
          border_color = "grey70",
          cellwidth = 15,
