@@ -7,7 +7,12 @@ munge_gca <- function(x){
   paste(strsplit(x, split = "_")[[1]][c(1,2)], collapse = "_")
 }
 
-
+colors =  c('Lower' = '#FFFEAB',
+            'Coral' = "#CE3DD0",
+            'Higher' = "#2D71F6",
+            'Leafcutter' = "#377D22",
+            'Outgroup1' = 'pink',
+            'Outgroup2' = 'blue')
 
 
 metadata <- read_csv('tables/metadata.csv')
@@ -62,8 +67,10 @@ all_data <- lapply(files, function(x){
 
 ann_colors = list(
   'BGC_type' = c(NRPS = '#1B9E77', PKSI = '#D95F02', Terpene = '#7570B3', Others = "#E7298A", PKS.NRP = "#66A61E"),
-  'Agriculture' = c(Leafcutter = 'green4', Lower = 'yellow', Coral = 'magenta3', Higher = 'blue3', Outgroup = 'white')
-)
+  'Agriculture' = c(Lower = '#FFFEAB',
+                      Coral = "#CE3DD0",
+                      Higher = "#2D71F6",
+                      Leafcutter = "#377D22", Outgroup2 = 'blue', Outgroup1 = 'pink'))
 
 
 all_bgc <- all_data %>%
@@ -76,10 +83,13 @@ all_bgc <- all_data %>%
 
 
 
-all_data %>% filter(num_agricultures >= 3, !BGC_type %in% c('mix')) %>%
-  select(component, BGC_type) %>%
+all_data %>% filter(num_agricultures >= 3) %>%
   distinct() %>%
-  write_tsv(., path = 'tables/bgc_greater_than_2_ags.txt')
+  rowwise() %>%
+  mutate(file = grep(paste0(component, ".gff3"), list.files('bigscape/gff3', pattern = BGC_type, full.names = TRUE), value = TRUE)) %>%
+  select(file) %>%
+  distinct() %>%
+  write_tsv(., path = 'tables/bgc_greater_than_2_ags.txt', col_names = FALSE)
 
 all_bgc_s <- all_bgc %>% select(-BGC_type) %>%
   distinct() %>%
@@ -182,12 +192,28 @@ ano_test <- anosim(bgc_dist, grouping = treat)
 summary(ano_test)
 plot(ano_test)
 
-ggord(example_NMDS, grp_in = treat, arrow = NULL, obslab = FALSE,
-      txt = FALSE,
-      poly=FALSE, size=2) + theme_classic() +
-  labs(title = 'BGCs stratify by ant agriculture',
-       subtitle = paste('Pval:', ano_test$signif, ", R:", round(ano_test$statistic, digits = 2))) +
-  ggsave('plots/BGC_all_ord.pdf')
+# ggord(example_NMDS, grp_in = treat, arrow = NULL, obslab = FALSE,
+#       txt = FALSE,
+#       poly=FALSE, size=2) + theme_classic() +
+#   labs(title = 'BGCs stratify by ant agriculture',
+#        subtitle = paste('Pval:', ano_test$signif, ", R:", round(ano_test$statistic, digits = 2))) +
+#   ggsave('plots/BGC_all_ord.pdf')
+
+
+
+data2 <- example_NMDS$points %>% 
+  data.frame() %>% 
+  rownames_to_column(var = 'genus_species') %>%
+  left_join(., metadata, by = 'genus_species')
+
+ggplot(data2, aes(x = MDS1, y = MDS2, color = Agriculture)) + 
+  geom_point() +
+  theme_bw() +
+  geom_text(data = filter(data2, genus_species %in% c('ICBG712', 'ICBG721')), 
+            aes(label = genus_species, color = NULL), nudge_x = -0.04, hjust = 0) + 
+  scale_color_manual(values = colors) +
+  labs(subtitle = paste('Pval:', ano_test$signif, ", R:", signif(ano_test$statistic, digits = 3))) +
+  ggsave('plots/BGC_all_ord.pdf', width = 7, height = 7)
 
 
 
@@ -293,11 +319,26 @@ ano_test <- anosim(bgc_dist, grouping = treat)
 summary(ano_test)
 plot(ano_test)
 
-ggord(example_NMDS, grp_in = treat, arrow = NULL, obslab = FALSE,
-      txt = FALSE,
-      poly=FALSE, size=2) + theme_classic() +
-  labs(title = 'BGCs stratify by ant agriculture',
-       subtitle = paste('Pval:', ano_test$signif, ", R:", round(ano_test$statistic, digits = 2))) +
-  ggsave('plots/BGC_mix_ord.pdf')
+# ggord(example_NMDS, grp_in = treat, arrow = NULL, obslab = FALSE,
+#       txt = FALSE,
+#       poly=FALSE, size=2) + theme_classic() +
+#   labs(title = 'BGCs stratify by ant agriculture',
+#        subtitle = paste('Pval:', ano_test$signif, ", R:", round(ano_test$statistic, digits = 2))) +
+#   ggsave('plots/BGC_mix_ord.pdf')
+
+data2 <- example_NMDS$points %>% 
+  data.frame() %>% 
+  rownames_to_column(var = 'genus_species') %>%
+  left_join(., metadata, by = 'genus_species')
+
+ggplot(data2, aes(x = MDS1, y = MDS2, color = Agriculture)) + 
+  geom_point() +
+  theme_bw() +
+  geom_text(data = filter(data2, genus_species %in% c('ICBG712', 'ICBG721')), 
+            aes(label = genus_species, color = NULL), nudge_x = -0.04, hjust = 0) + 
+  scale_color_manual(values = colors) +
+  labs(subtitle = paste('Pval:', ano_test$signif, ", R:", signif(ano_test$statistic, digits = 3))) +
+  ggsave('plots/BGC_mix_ord.pdf', width = 7, height = 7)
+
 
 

@@ -178,7 +178,7 @@ ggord(pca_data,
       txt = FALSE,## labeling the ordination
       poly=FALSE, 
       size=2) + theme_classic() +
-  ggsave('plots/card_ord_all.pdf')
+  ggsave('plots/card_ord_all.pdf', width =7, height =7)
 
 ## there's really only one component that explains the data
 

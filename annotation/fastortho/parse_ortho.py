@@ -58,7 +58,6 @@ def main(argv):
             if genome in ortho_dict[ortho_group]:
                 ortho_dict[ortho_group][genome][0] += 1
                 ortho_dict[ortho_group][genome][1].append(gene)
-
             else:
                 ortho_dict[ortho_group][genome] = [1, [gene]]
     tall_matrix.close()
