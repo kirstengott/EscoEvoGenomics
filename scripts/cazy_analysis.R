@@ -31,18 +31,22 @@ cazy <- lapply(cazy_files, function(c){
   select(-tool, -cazy_id, -`#ofTools`) %>%
   unnest(cazy_id = strsplit(cazy_ids, ",")) %>%
   unnest(cazy = strsplit(cazy_id, "\\+")) %>%
-  select(gene, start, stop, genome, cazy) %>%
+  select(gene, genome, cazy) %>%
   distinct() %>%
+  filter(cazy != 'N') %>%
   mutate(cazy_base = sub("_.*$", "", cazy)) %>%
   left_join(., fam_db, by = 'cazy_base') %>%
-  filter(cazy != 'N') %>%
-  group_by(genome, cazy_base) %>%
+  group_by(genome, cazy) %>%
   mutate(n_genes = as.numeric(length(unique(gene)))) %>%
+  ungroup() %>%
+  group_by(genome, gene) %>%
+  mutate(n_cazy = as.numeric(length(unique(cazy)))) %>%
   ungroup() %>%
   rename('acc' = genome) %>%
   left_join(., metadata, by = 'acc') 
 
 
+<<<<<<< HEAD
 # write_csv(cazy, path = 'tables/cazy_annotation.csv')
 # 
 # c_heat <- cazy %>%
@@ -89,6 +93,107 @@ cazy <- lapply(cazy_files, function(c){
 # treat <- replace_na(treat, replace = 'Outgroup') ## corresponds to rows/communities (genomes)
 # 
 # ano_test <- anosim(c_dist, grouping = treat)
+=======
+
+write_csv(cazy, path = 'tables/cazy_annotation.csv')
+
+c_heat <- cazy %>%
+  select(-gene, -n_cazy, -cazy_base, -cazy_description, -Agriculture, -acc, -contains('cazyme_groups')) %>%
+  distinct() %>%
+  spread(genus_species, n_genes) %>%
+  data.frame()
+c_heat[is.na(c_heat)] <- 0
+
+rownames(c_heat) <- c_heat$cazy
+c_heat$cazy <- NULL
+
+c_heat <- t(c_heat)
+
+pca_data <- prcomp(c_heat)
+
+eigs <- pca_data$sdev^2
+proportion = (eigs/sum(eigs))*100
+head(proportion)
+cumulative = cumsum(eigs)/sum(eigs)
+screeplot(pca_data)
+
+
+n_k <- length(which(proportion >= 10))
+
+if(n_k < 2){
+  n_k = 2
+}
+
+
+
+## nmds
+## bray curtis distance is more resilient to nulls
+example_NMDS=metaMDS(c_heat, k = n_k) # The number of reduced dimensions ## components with >10% variance explained
+stressplot(example_NMDS)
+
+
+
+## test for significance
+c_dist <- vegdist(c_heat)
+
+treat <- metadata[sapply(labels(c_dist), function(x){grep(x, metadata$genus_species)}), 'cazyme_groups1', drop = TRUE]
+treat <- replace_na(treat, replace = 'Outgroup') ## corresponds to rows/communities (genomes)
+
+ano_test <- anosim(c_dist, grouping = treat)
+summary(ano_test)
+plot(ano_test)
+
+data1 <- example_NMDS$species %>%
+  data.frame() %>%
+  rownames_to_column(var = 'cazy_base')
+data2 <- example_NMDS$points %>% 
+  data.frame() %>% 
+  rownames_to_column(var = 'genus_species') %>%
+  left_join(., metadata, by = 'genus_species')
+
+# data1 %>% 
+#   mutate(interest = ifelse(cazy_base %in% caz_interest, yes = TRUE, no = FALSE)) %>%
+#   left_join(., fam_db, by = 'cazy_base') %>%
+#   write_csv('tables/cazy_ord_all.csv')
+
+data1_sub <- data1 %>% filter(!is.nan(MDS1), !is.nan(MDS2))
+
+
+ggplot(data2, aes(x = MDS1, y = MDS2, color = cazyme_groups1)) + 
+  geom_point() + 
+  #geom_text(data = data1_sub, aes(label = cazy_base, color = NULL)) +
+#  geom_text(aes(label = genus_species, color = NULL, size = 0.5), nudge_x = 1) + 
+  theme_bw() +
+  labs(subtitle = paste('Pval:', ano_test$signif, ", R:", signif(ano_test$statistic, digits = 3))) +
+  ggsave('plots/cazy_ord_all.pdf')
+
+#all_escovopsis_caz_interest  <- filter(data1, MDS1 >= -0.1) %>% .$cazy_base
+
+# ggord(example_NMDS,
+#       grp_in = treat,
+#       arrow = NULL, ## draw the arrows
+#       obslab = FALSE,
+#       txt = FALSE,## labeling the ordination
+#       poly=FALSE, size=1,
+#       ellipse = FALSE) + theme_classic() +
+#   labs(subtitle = paste('Pval:', ano_test$signif, ", R:", signif(ano_test$statistic, digits = 3))) +
+#   ggsave('plots/cazy_ord_all.pdf')
+
+
+## only compare leafcutter to the outgroup
+treat <- metadata[sapply(labels(c_dist), function(x){grep(x, metadata$genus_species)}), 'cazyme_groups2', drop = TRUE]
+treat <- replace_na(treat, replace = 'Outgroup') ## corresponds to rows/communities (genomes)
+
+new_treat_ind <- which(treat %in% c('Coral1', 'Lower', 'FFA'))
+new_treat     <- treat[new_treat_ind]
+c_new         <- c_heat[new_treat_ind, ]
+
+example_NMDS=metaMDS(c_new, k = n_k) # The number of reduced dimensions ## components with >10% variance explained
+stressplot(example_NMDS)
+
+# bgc_dist <- vegdist(c_new)
+# ano_test <- anosim(bgc_dist, grouping = new_treat)
+>>>>>>> b74b45855e9845d75aaf5dc53b5e09fb92451042
 # summary(ano_test)
 # plot(ano_test)
 # 
@@ -208,8 +313,8 @@ cazy <- lapply(cazy_files, function(c){
 
 ## find interesting cazymes by groups
 caz_interest <- cazy %>%
-  select(-start, -stop, -gene) %>%
-  select(-cazy_base, -cazy_description, -Agriculture, -acc, -genus_species, -cazyme_groups1) %>%
+  select(-gene) %>%
+  select(-n_cazy, -cazy_base, -cazy_description, -Agriculture, -acc, -genus_species, -cazyme_groups1) %>%
   distinct() %>%
   group_by(cazyme_groups2, cazy) %>%
   mutate(n_genes = signif(mean(n_genes), digits =2)) %>%
@@ -228,7 +333,7 @@ caz_interest <- cazy %>%
   .$cazy
 
 c_sum <- cazy %>%
-  select(-start, -stop, -gene) %>%
+  select(-n_cazy, -gene) %>%
   select(-cazy_base, -cazy_description, -Agriculture, -acc, -contains('cazyme_groups')) %>%
   distinct() %>%
   spread(genus_species, n_genes) %>%
