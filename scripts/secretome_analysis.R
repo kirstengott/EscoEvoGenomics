@@ -1,4 +1,15 @@
 library(tidyverse)
+library(vegan)
+
+## just look at cazy num genes v num domains plot
+ag_colours <- c("Generalist" = "#808080",
+                "Coral" = "#CE3DD0",
+                "Higher" = "#2D71F6",
+                "Lower" = "#FFFEAB",
+                "Leafcutter" = "#377D22",
+                "Outgroup1" = 'black',
+                "Outgroup2" = 'gray')
+
 
 shorten_genus_species <- function(x){
   spl = strsplit(x, split = " ")
@@ -125,11 +136,21 @@ cazy_spread <- cazy %>%
 #cazy_spread[is.na(cazy_spread)] <- 0
 all_annotations <- read_tsv('annotation/all_annotations.txt', col_names = c('genome', 'gene', 'tool', 'value'))
 
+## number of annotations
+all_annotations %>% select(genome, gene) %>% distinct() %>% .$genome %>% table()
+
 interpro_filtered <- all_annotations %>% 
   filter(tool %in% c('TMHMM', 'SignalP_EUK')) %>% 
   tidyr::spread(key = tool, value = value) %>% 
   filter(!is.na(SignalP_EUK) | TMHMM == 1) %>%
   .$gene
+
+
+## I'm looking for extr
+
+## cytoskeleton, cytoplasm, nucleus, mitochondria, vesicles of secretory system, 
+## endoplasmic reticulum (ER), Golgi, vacuole, plasma membrane, peroxisome, 
+## extracellular space including cell wall.
 
 wolfpsort <- all_annotations %>% filter(tool == 'wolfpsort', grepl('extr', value)) %>%
   select(gene, genome) %>%
@@ -151,31 +172,191 @@ secreted <- all_secreted %>%
   left_join(., all_enzymes, by = c('genome', 'gene')) %>%
   filter(!is.na(type))
 
-## number of annotations
-all_annotations %>% select(genome, gene) %>% distinct() %>% .$genome %>% table()
 
 
-## I'm looking for extr
+secreted_nmds <- secreted %>%
+  select(genome, value, count) %>%
+  group_by(genome, value) %>%
+  summarize(count_all = sum(count)) %>%
+  spread(key = value, value = count_all) %>%
+  column_to_rownames(var  = 'genome') %>%
+  data.frame()
+secreted_nmds[is.na(secreted_nmds)] <- 0
 
-## cytoskeleton, cytoplasm, nucleus, mitochondria, vesicles of secretory system, 
-## endoplasmic reticulum (ER), Golgi, vacuole, plasma membrane, peroxisome, 
-## extracellular space including cell wall.
+
+pca_data <- prcomp(secreted_nmds)
+eigs <- pca_data$sdev^2
+proportion = (eigs/sum(eigs))*100
+head(proportion)
+cumulative = cumsum(eigs)/sum(eigs)
+screeplot(pca_data)
 
 
-## make sure the min is 1, only keep genes with a secretome activity
-#rowSums(select(all_data, -gene, -genome)) %>% summary()
+n_k <- length(which(proportion >= 10))
 
-# all_data %>% group_by(genome) %>%
-#   summarize(length(unique(gene))) %>%
-#   View()
+if(n_k < 2){
+  n_k = 2
+}
 
+## nmds
+## bray curtis distance is more resilient to nulls
+example_NMDS=metaMDS(secreted_nmds, k = n_k) # The number of reduced dimensions ## components with >10% variance explained
+stressplot(example_NMDS)
+
+## test for significance
+c_dist <- vegdist(secreted_nmds)
+
+treat <- metadata[sapply(labels(c_dist), function(x){grep(x, metadata$genome_id)}), 'Agriculture', drop = TRUE]
+
+#treat <- replace_na(treat, replace = 'Outgroup') ## corresponds to rows/communities (genomes)
+
+ano_test <- anosim(c_dist, grouping = treat)
+summary(ano_test)
+plot(ano_test)
+
+data1 <- example_NMDS$species %>%
+  data.frame() %>%
+  rownames_to_column(var = 'cazy_base')
+
+data2 <- example_NMDS$points %>% 
+  data.frame() %>% 
+  rownames_to_column(var = 'acc')
+
+data2 <- metadata[sapply(data2$acc, function(x){grep(x, metadata$genome_id)}),] %>%
+bind_cols(., data2)
+
+data2_sub <- data2 %>% filter(genus_species %in% c('Cladobotryum protrusum',
+                                                   'Hypomyces perniciosus',
+                                                   'ICBG712', 
+                                                   'ICBG721'))
+
+ggplot(data2, aes(x = MDS1, y = MDS2)) + 
+  geom_point(shape = 21, size = 3, aes(fill = Agriculture), stroke = 0.5, colour = 'black') +
+  #geom_text(data = data1_sub, aes(label = cazy_base, color = NULL)) +
+  scale_fill_manual(values = ag_colours) +
+  scale_color_manual(values = ag_colours) +
+  geom_text(data= data2_sub, aes(label = genus_species, 
+                                 color = NULL,
+                                 hjust=0, vjust=0)) + 
+  theme_bw() +
+  ggsave('plots/secretome_ord_all.pdf', width = 7, height = 7)
+
+
+
+
+
+# all_secreted_summary$genus_species <- factor(all_secreted_summary$genus_species,
+#                                              levels = rev(metadata$genus_species))
+# 
+# 
+# colors <- c('cazyme' = '#46ACC8', 'lipase' = '#E2D200', 'peptidase' = '#B40F20')
+# 
+# ## overall numbers
+# ggplot(all_secreted_summary, aes(x = genus_species, y = count, fill = type)) +
+#   coord_flip() +
+#   geom_col() +
+#   labs(x = '', y = '') +
+#   theme_classic() +
+#   scale_fill_manual(values = colors) +
+#   theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+#   ggsave('plots/secretome_summary.pdf')
+
+
+
+not_secreted <- all_enzymes %>% filter(!gene %in% secreted$gene)
+
+not_secreted_nmds <- not_secreted %>%
+  select(genome, value, count) %>%
+  group_by(genome, value) %>%
+  summarize(count_all = sum(count)) %>%
+  spread(key = value, value = count_all) %>%
+  column_to_rownames(var  = 'genome') %>%
+  data.frame()
+not_secreted_nmds[is.na(not_secreted_nmds)] <- 0
+
+
+pca_data <- prcomp(not_secreted_nmds)
+eigs <- pca_data$sdev^2
+proportion = (eigs/sum(eigs))*100
+head(proportion)
+cumulative = cumsum(eigs)/sum(eigs)
+screeplot(pca_data)
+
+
+n_k <- length(which(proportion >= 10))
+
+if(n_k < 2){
+  n_k = 2
+}
+
+## nmds
+## bray curtis distance is more resilient to nulls
+example_NMDS=metaMDS(not_secreted_nmds, k = n_k) # The number of reduced dimensions ## components with >10% variance explained
+stressplot(example_NMDS)
+
+## test for significance
+c_dist <- vegdist(not_secreted_nmds)
+
+treat <- metadata[sapply(labels(c_dist), function(x){grep(x, metadata$genome_id)}), 'Agriculture', drop = TRUE]
+
+#treat <- replace_na(treat, replace = 'Outgroup') ## corresponds to rows/communities (genomes)
+
+ano_test <- anosim(c_dist, grouping = treat)
+summary(ano_test)
+plot(ano_test)
+
+
+data2 <- example_NMDS$points %>% 
+  data.frame() %>% 
+  rownames_to_column(var = 'acc')
+
+data2 <- metadata[sapply(data2$acc, function(x){grep(x, metadata$genome_id)}),] %>%
+  bind_cols(., data2)
+
+data2_sub <- data2 %>% filter(genus_species %in% c('Cladobotryum protrusum',
+                                                   'Hypomyces perniciosus',
+                                                   'ICBG712', 
+                                                   'ICBG721'))
+
+ggplot(data2, aes(x = MDS1, y = MDS2)) + 
+  geom_point(shape = 21, size = 3, aes(fill = Agriculture), stroke = 0.5, colour = 'black') +
+  #geom_text(data = data1_sub, aes(label = cazy_base, color = NULL)) +
+  scale_fill_manual(values = ag_colours) +
+  geom_text(data= data2_sub, aes(label = genus_species, 
+                                 color = NULL,
+                                 hjust=0, vjust=0)) + 
+  theme_bw() +
+  ggsave('plots/non_secretome_ord_all.pdf', width = 7, heigh = 7)
 
 
 all_secreted_summary <- secreted %>% 
   group_by(genome, type) %>%
-  summarize(count = sum(count))
-  
-  
+  summarize(count = sum(count))%>%
+  mutate(group = 'secreted')
+
+catabolite_summary <- not_secreted %>% 
+  group_by(genome, type) %>%
+  summarize(count = sum(count)) %>%
+  mutate(group = 'non_secreted') %>%
+  bind_rows(., all_secreted_summary) %>%
+  rename('acc' = genome) %>%
+  left_join(., metadata, by = 'acc') 
+
+catabolite_summary$genus_species <- factor(catabolite_summary$genus_species,
+                                             levels = rev(metadata$genus_species))
+
+## overall numbers
+ggplot(catabolite_summary, aes(x = genus_species, y = count, fill = type)) +
+  coord_flip() +
+  geom_col() +
+  labs(x = '', y = '') +
+  facet_grid(~group) +
+  theme_classic() +
+  scale_fill_manual(values = colors) +
+  ggsave('plots/catabolite_summary.pdf', width = 14)
+
+
+
 metadata <- read_csv('tables/metadata.csv') %>%
   mutate(acc_red = sub("\\..*$", "", acc)) %>%
   group_by(genus_species) %>%
@@ -187,61 +368,45 @@ metadata <- read_csv('tables/metadata.csv') %>%
 
 
 
-colors <- c('cazyme' = '#46ACC8', 'lipase' = '#E2D200', 'peptidase' = '#B40F20')
 
-## overall numbers
-ggplot(all_secreted_summary, aes(x = genome, y = count, fill = type)) +
-  geom_col() +
-  labs(x = '', y = '') +
-  theme_classic() +
-  scale_fill_manual(values = colors) +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
-  ggsave('plots/secretome_summary.pdf')
-
-
-
-
-
-not_secreted <- all_enzymes %>% filter(!gene %in% secreted$gene)
-
-not_secreted_summary <- not_secreted %>% 
+all_sum <- all_enzymes %>% 
   group_by(genome, type) %>%
-  summarize(count = sum(count))
-
-## overall numbers
-ggplot(not_secreted_summary, aes(x = genome, y = count, fill = type)) +
-  geom_col() +
-  labs(x = '', y = '') +
-  theme_classic() +
-  scale_fill_manual(values = colors) +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
-  ggsave('plots/non_secreted_catabolite_summary.pdf')
-
-
-
-## just look at cazy num genes v num domains plot
-ag_colours <- c("Generalist" = "#808080",
-             "Coral" = "#CE3DD0",
-             "Higher" = "#2D71F6",
-             "Lower" = "#FFFEAB",
-             "Leafcutter" = "#377D22",
-             "Outgroup1" = 'black',
-             "Outgroup2" = 'gray')
-
-cazy_sum <- cazy %>% group_by(genome) %>%
   summarize(num_genes = length(unique(gene)),
-            num_domain = length(unique(cazy_base))) %>%
+            num_domain = length(unique(value))) %>%
   rename('acc' = genome) %>%
   left_join(., metadata, by = 'acc') %>%
-  mutate(Agriculture =ifelse(is.na(Agriculture), yes = 'Generalist', no = Agriculture))
+  mutate(Agriculture =ifelse(is.na(Agriculture), 
+                             yes = 'Generalist', 
+                             no = Agriculture))
 
-cazy_sum %>%
+all_sum %>%
   ggplot(., aes(x = num_genes, y = num_domain)) +
-  geom_point(shape = 21, size = 2, aes(fill = Agriculture), stroke = 0.5, colour = 'black') +
+  geom_point(shape = 21, size = 3, aes(fill = Agriculture), stroke = 0.5, colour = 'black') +
   scale_fill_manual(values = ag_colours) +
-  theme_classic() +
-  ggsave('plots/cazy_domain_diversity_all.pdf')
+  facet_grid(cols = vars(type), scales = 'free_x') + 
+  scale_y_continuous(breaks = seq(0, 150, by = 10), labels =seq(0, 150, by = 10)) +
+  theme_bw() +
+  theme(
+    legend.position = c(.95, .95),
+    legend.justification = c("right", "top"),
+    legend.box.just = "right",
+    legend.margin = margin(6, 6, 6, 6)
+  ) + 
+  ggsave('plots/catabolic_domain_diversity_all.pdf', width = 15, height = 8)
 
 
+## enzymes only in ffa
+all_enzymes %>%
+  rename('acc' = genome) %>%
+  left_join(., metadata, by = 'acc') %>%
+  mutate(Agriculture =ifelse(is.na(Agriculture), 
+                             yes = 'Generalist', 
+                             no = Agriculture)) %>%
+  select(cazyme_groups1, value) %>%
+  distinct() %>%
+  group_by(value) %>%
+  mutate(num_groups = length(unique(cazyme_groups1))) %>%
+  filter(num_groups == 1 && cazyme_groups1 == 'FFA')
+  
 
 

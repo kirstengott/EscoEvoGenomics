@@ -7,13 +7,14 @@ munge_gca <- function(x){
   paste(strsplit(x, split = "_")[[1]][c(1,2)], collapse = "_")
 }
 
-colors =  c('Lower' = '#FFFEAB',
-            'Coral' = "#CE3DD0",
-            'Higher' = "#2D71F6",
-            'Leafcutter' = "#377D22",
-            'Outgroup1' = 'pink',
-            'Outgroup2' = 'blue')
 
+colors <- c("Generalist" = "#808080",
+                "Coral" = "#CE3DD0",
+                "Higher" = "#2D71F6",
+                "Lower" = "#FFFEAB",
+                "Leafcutter" = "#377D22",
+                "Outgroup1" = 'black',
+                "Outgroup2" = 'gray')
 
 metadata <- read_csv('tables/metadata.csv')
 meta_levels <- metadata$genus_species
@@ -35,7 +36,7 @@ all_data <- lapply(files, function(x){
   group_by(bigscape) %>%
   mutate(acc = case_when(
     grepl('GCA', bigscape) ~ munge_gca(bigscape),
-    grepl('SPDT', bigscape) ~ paste(strsplit(bigscape, split = "\\.")[[1]][c(1,2)], collapse = "."),
+    grepl('SPDT', bigscape) ~ "SPDT00000000.1",
     TRUE ~ sub("_.*$", "", bigscape)
   )) %>%
   ungroup() %>%
@@ -70,7 +71,7 @@ ann_colors = list(
   'Agriculture' = c(Lower = '#FFFEAB',
                       Coral = "#CE3DD0",
                       Higher = "#2D71F6",
-                      Leafcutter = "#377D22", Outgroup2 = 'blue', Outgroup1 = 'pink'))
+                      Leafcutter = "#377D22", Outgroup2 = 'gray', Outgroup1 = 'black'))
 
 
 all_bgc <- all_data %>%
@@ -97,6 +98,7 @@ all_bgc_s <- all_bgc %>% select(-BGC_type) %>%
   data.frame()
 
 rownames(all_bgc_s) <- all_bgc_s$genus_species
+
 all_bgc_s$genus_species <- NULL
 all_bgc_s <- as.matrix(all_bgc_s)
 all_bgc_s[is.na(all_bgc_s)] <- 0
@@ -138,7 +140,6 @@ pheatmap::pheatmap(all_bgc_s[rows_order,],
                    annotation_row = annotation_row,
                    annotation_col = annotation_col,
                    annotation_colors = ann_colors,
-                   main = "Components present in at least one ant agriculture",
                    filename = paste0('plots/all_BGC_components_heatmap.pdf'))
 
 
@@ -178,7 +179,7 @@ n_k <- length(which(proportion >= 10))
 
 ## nmds
 ## bray curtis distance is more resilient to nulls
-example_NMDS=metaMDS(all_bgc_s, k = n_k) # The number of reduced dimensions ## components with >10% variance explained
+example_NMDS=metaMDS(all_bgc_s, k = 2) # The number of reduced dimensions ## components with >10% variance explained
 
 stressplot(example_NMDS)
 
@@ -206,14 +207,13 @@ data2 <- example_NMDS$points %>%
   rownames_to_column(var = 'genus_species') %>%
   left_join(., metadata, by = 'genus_species')
 
-ggplot(data2, aes(x = MDS1, y = MDS2, color = Agriculture)) + 
-  geom_point() +
+ggplot(data2, aes(x = MDS1, y = MDS2)) + 
+  geom_point(shape = 21, size = 3, aes(fill = Agriculture), stroke = 0.5, colour = 'black') +
   theme_bw() +
   geom_text(data = filter(data2, genus_species %in% c('ICBG712', 'ICBG721')), 
             aes(label = genus_species, color = NULL), nudge_x = -0.04, hjust = 0) + 
-  scale_color_manual(values = colors) +
-  labs(subtitle = paste('Pval:', ano_test$signif, ", R:", signif(ano_test$statistic, digits = 3))) +
-  ggsave('plots/BGC_all_ord.pdf', width = 7, height = 7)
+  scale_fill_manual(values = colors) +
+  ggsave('plots/BGC_all_ord.pdf', width = 7, height = 5)
 
 
 
@@ -267,7 +267,6 @@ pheatmap::pheatmap(all_bgc_s[rows_order,],
                    cellheight = 10,
                    annotation_row = annotation_row,
                    annotation_colors = ann_colors,
-                   main = "Mixed components present in at least one ant agriculture",
                    filename = paste0('plots/all_BGC_components_mix_heatmap.pdf'))
 ## Ordinate all BGCs
 
@@ -331,14 +330,15 @@ data2 <- example_NMDS$points %>%
   rownames_to_column(var = 'genus_species') %>%
   left_join(., metadata, by = 'genus_species')
 
-ggplot(data2, aes(x = MDS1, y = MDS2, color = Agriculture)) + 
-  geom_point() +
+ggplot(data2, aes(x = MDS1, y = MDS2)) + 
+  geom_point(shape = 21, size = 3, aes(fill = Agriculture), stroke = 0.5, colour = 'black') +
   theme_bw() +
   geom_text(data = filter(data2, genus_species %in% c('ICBG712', 'ICBG721')), 
             aes(label = genus_species, color = NULL), nudge_x = -0.04, hjust = 0) + 
-  scale_color_manual(values = colors) +
-  labs(subtitle = paste('Pval:', ano_test$signif, ", R:", signif(ano_test$statistic, digits = 3))) +
+  scale_fill_manual(values = colors) +
   ggsave('plots/BGC_mix_ord.pdf', width = 7, height = 7)
+
+
 
 
 
