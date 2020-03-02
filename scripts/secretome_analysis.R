@@ -21,10 +21,10 @@ led <- lapply(led_f, function(x){
   select(gene, lipase, genome)
 
 
-led %>% group_by(genome_f) %>%
-  summarize(length(unique(lipase)),
-            length(unique(gene))) %>%
-  View()
+# led %>% group_by(genome_f) %>%
+#   summarize(length(unique(lipase)),
+#             length(unique(gene))) %>%
+#   View()
 
 ## peptidase
 
@@ -40,36 +40,44 @@ merops <- lapply(merops_f, function(x){
   select(gene, peptidase, genome)
 
 
+viru_f <- list.files('annotation/virulence/parsed', full.names = TRUE, pattern = 'fa')
 
+viru <- lapply(viru_f, function(x){
+  read_tsv(x, col_names = c('gene', 'virulence', 'eval', 'p_id', 'len')) %>%
+    mutate(genome_f = basename(x))    %>%
+    mutate(genome = paste(strsplit(genome_f, split = "_")[[1]][c(1,2)], collapse = "_")) %>%
+    mutate(genome = sub("\\..*$", "", genome)) %>%
+    mutate(peptidase = sub("-.*$", "", virulence))
+}) %>% bind_rows() %>%
+  select(gene, virulence, genome)
 
 
 ## cazymes
 fam_db <- read_tsv('annotation/CAZyDB.07312018.fam-activities.txt', comment = '#', col_names = c('cazy_base', 'cazy_description'))
-cazy_files <- list.files('annotation/cazy', full.names = TRUE)
+
+cazy_files <- list.files('annotation/cazy/eCAMIout', full.names = TRUE)
 
 cazy <- lapply(cazy_files, function(c){
-  read_tsv(c) %>%
-    mutate(genome = sub(".txt", "", basename(c)))
+  read_tsv(c, col_names = c('gene', 'family', 'subfamily')) %>%
+    mutate(gene = sub(" .*$", "", gene)) %>%
+    mutate(genome = basename(c))    %>%
+    mutate(genome = paste(strsplit(genome, split = "_")[[1]][c(1,2)], collapse = "_")) %>%
+    mutate(genome = sub("\\..*$", "", genome)) %>%
+    mutate(cazyme = gsub('\\|[0-9]\\..*$', '', subfamily)) %>% ## remove counts    
+    mutate(cazyme = sub("\\|.*$", '', cazyme)) %>%
+    mutate(cazyme = gsub(':[0-9]+', '', cazyme)) %>% ## remove counts
+    mutate(ec = stringr::str_extract_all(subfamily, '\\|[0-9\\.:]+\\|')) %>%
+    mutate(ec = sapply(ec, paste, collapse='')) %>%
+    mutate(ec = gsub(':[0-9]+', '', ec)) %>%
+    mutate(ec = gsub('\\|\\|', ",", ec)) %>%
+    mutate(ec = gsub('\\|', '', ec))## remove counts
 }) %>% bind_rows() %>%
-  separate(HMMER, into = c('hmmer', 'startstop'), sep = "\\(", remove = FALSE) %>%
-  separate(startstop, into = c('start', 'stop'), sep = '-') %>%
-  mutate(stop = sub("\\)", "", stop)) %>%
-  mutate(HMMER = gsub('\\([0-9-]+\\)', "", HMMER)) %>%
-  select(-hmmer) %>%
-  rename(gene = `Gene ID`) %>%
-  gather(tool, cazy_id, -gene, -start, -stop, -`#ofTools`, -genome) %>%
-  group_by(gene) %>%
-  mutate(cazy_ids = paste(unique(cazy_id), collapse = ",")) %>%
-  select(-tool, -cazy_id, -`#ofTools`) %>%
-  unnest(cazy_id = strsplit(cazy_ids, ",")) %>%
-  unnest(cazy = strsplit(cazy_id, "\\+")) %>%
-  select(gene, start, stop, genome, cazy) %>%
   distinct() %>%
-  mutate(cazy_base = sub("_.*$", "", cazy)) %>%
-  left_join(., fam_db, by = 'cazy_base') %>%
-  filter(cazy != 'N') %>%
-  group_by(genome, cazy_base) %>%
+  group_by(genome, cazyme) %>%
   mutate(n_genes = as.numeric(length(unique(gene)))) %>%
+  ungroup() %>%
+  group_by(genome, gene) %>%
+  mutate(n_cazy = as.numeric(length(unique(cazyme)))) %>%
   ungroup() %>%
   mutate(cazy = 1) #%>% select(gene, cazy, genome)
 
@@ -119,8 +127,7 @@ targetp <- lapply(targetp_f, function(x){
 #wolfp_f <- list.files('wolfpsort', full.names = TRUE)
 
 cazy_spread <- cazy %>%
-  select(gene, genome, cazy_base) %>%
-  rename('cazyme' = cazy_base)
+  select(gene, genome, cazyme)
 
 #cazy_spread[is.na(cazy_spread)] <- 0
 all_annotations <- read_tsv('annotation/all_annotations.txt', col_names = c('genome', 'gene', 'tool', 'value'))
@@ -141,7 +148,8 @@ all_secreted <- bind_rows(targetp, wolfpsort) %>% distinct()
 all_enzymes <- cazy_spread %>%
   left_join(., merops, by = c('genome', 'gene')) %>%
   left_join(., led, by = c('genome', 'gene')) %>%
-  gather(type, value, -gene, -genome) %>%
+  left_join(., viru, by = c('genome', 'gene')) %>%
+  gather(type, value, -gene, -genome) %>% 
   filter(!is.na(value)) %>%
   mutate(count = 1)
 
@@ -187,7 +195,10 @@ metadata <- read_csv('tables/metadata.csv') %>%
 
 
 
-colors <- c('cazyme' = '#46ACC8', 'lipase' = '#E2D200', 'peptidase' = '#B40F20')
+colors <- c('cazyme' = '#46ACC8', 
+            'lipase' = '#E2D200', 
+            'peptidase' = '#E58601',
+            'virulence' = "#B40F20")
 
 ## overall numbers
 ggplot(all_secreted_summary, aes(x = genome, y = count, fill = type)) +
@@ -230,7 +241,7 @@ ag_colours <- c("Generalist" = "#808080",
 
 cazy_sum <- cazy %>% group_by(genome) %>%
   summarize(num_genes = length(unique(gene)),
-            num_domain = length(unique(cazy_base))) %>%
+            num_domain = length(unique(cazyme))) %>%
   rename('acc' = genome) %>%
   left_join(., metadata, by = 'acc') %>%
   mutate(Agriculture =ifelse(is.na(Agriculture), yes = 'Generalist', no = Agriculture))

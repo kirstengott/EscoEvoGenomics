@@ -2,24 +2,28 @@ library(tidyverse)
 library(pheatmap)
 library(vegan)
 library(ggord)
+library(dendextend)
 
 munge_gca <- function(x){
   paste(strsplit(x, split = "_")[[1]][c(1,2)], collapse = "_")
 }
 
-colors =  c('Lower' = '#FFFEAB',
-            'Coral' = "#CE3DD0",
-            'Higher' = "#2D71F6",
-            'Leafcutter' = "#377D22",
-            'Outgroup1' = 'pink',
-            'Outgroup2' = 'blue')
+colors <- c("Coral" = "#CE3DD0",
+                "Higher" = "#2D71F6",
+                "Lower" = "#b8860b",
+                "Leafcutter" = "#377D22",
+                "Outgroup1" = 'black',
+                "Outgroup2" = 'gray')
 
 
 metadata <- read_csv('tables/metadata.csv')
 meta_levels <- metadata$genus_species
 
 ## dive in deeper to presence absence output
-ant_ag <- na.omit(unique(metadata$Agriculture))
+ant_ag <- c("Lower",
+            "Coral",
+            "Higher", 
+            "Leafcutter")
 
 
 
@@ -35,14 +39,14 @@ all_data <- lapply(files, function(x){
   group_by(bigscape) %>%
   mutate(acc = case_when(
     grepl('GCA', bigscape) ~ munge_gca(bigscape),
-    grepl('SPDT', bigscape) ~ paste(strsplit(bigscape, split = "\\.")[[1]][c(1,2)], collapse = "."),
+    grepl('SPDT', bigscape) ~ "SPDT00000000",
     TRUE ~ sub("_.*$", "", bigscape)
   )) %>%
   ungroup() %>%
   left_join(., metadata, by = 'acc') %>%
   mutate(Presence = 1) %>%
   group_by(component, BGC_type) %>%
-  mutate(num_agricultures = length(unique(na.omit(Agriculture)))) %>% ## removes outgroups from count
+  mutate(num_agricultures = length(unique(Agriculture[which(Agriculture %in% ant_ag)]))) %>% ## removes outgroups from count
   filter(!is.na(acc)) %>%
   mutate(Agriculture = ifelse(is.na(Agriculture),
                               yes = 'Outgroup',
@@ -111,6 +115,7 @@ m$genus_species <- NULL
 
 
 
+
 annotation_col <- all_bgc %>%
   select(-genus_species, -Presence) %>%
   filter(bgc_plot_label %in% colnames(all_bgc_s)) %>%
@@ -127,10 +132,11 @@ annotation_row = data.frame(
     stringsAsFactors = FALSE
    )
 
+
 pheatmap::pheatmap(all_bgc_s[rows_order,],
                    legend = FALSE,
                    color = c('grey87', 'black'),
-                   cluster_rows = TRUE,
+                   cluster_rows = clusters,
                    cluster_cols = TRUE,
                    border_color = "grey70",
                    cellwidth = 10,
@@ -143,7 +149,7 @@ pheatmap::pheatmap(all_bgc_s[rows_order,],
 
 
 
-## Ordinate all BGCs
+## Ordinate all BGCs with no threshold cutoff
 
 all_bgc <- all_data %>%
   filter(!BGC_type %in% c('mix'),
@@ -159,14 +165,43 @@ all_bgc_s <- all_bgc %>% select(-BGC_type) %>%
   spread(bgc_plot_label, Presence) %>%
   data.frame()
 
+
 rownames(all_bgc_s) <- all_bgc_s$genus_species
 all_bgc_s$genus_species <- NULL
 all_bgc_s <- as.matrix(all_bgc_s)
 all_bgc_s[is.na(all_bgc_s)] <- 0
 
 
-pca_data <- prcomp(all_bgc_s)
 
+
+library(pvclust)
+set.seed(1234)
+result <- pvclust(t(all_bgc_s), method.dist="cor",
+                  method.hclust="average", nboot=100)
+
+pdf(file = 'plots/bootstrapped_BGC_dendrogram.pdf')
+plot(result)
+pvrect(result, pv = 'bp')
+dev.off()
+
+dend_colors        <- metadata$Agriculture
+names(dend_colors) <- metadata$genus_species
+
+
+hcd <- as.dendrogram(result)  %>%
+  set("leaves_pch", 19) %>%
+  set("leaves_col", colors[dend_colors[result$hclust$labels[result$hclust$order]]])
+
+
+
+pdf(file = 'plots/bootstrapped_BGC_dendrogram_colors.pdf')
+par(mar = c(2, 2, 2, 10))
+plot(hcd, horiz = TRUE, edgePar = list(lwd = 2))
+dev.off()
+
+
+
+pca_data <- prcomp(all_bgc_s)
 eigs <- pca_data$sdev^2
 proportion = (eigs/sum(eigs))*100
 head(proportion)
