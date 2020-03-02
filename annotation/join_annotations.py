@@ -122,20 +122,41 @@ def parse_wolfpsort(annots, wolfpsort, genome_id):
                     annots[genome_id][gene]['wolfpsort'].append(loc_out)
         return(annots)
 
+
+def parse_cazy(cazy, annots, genome_id):
+    header = 0
+    with open(cazy, 'r') as f:
+        for line in f:
+            if header == 0:
+                header +=1
+                continue
+            else:
+                line = line.strip().split()
+                gene = line[0]
+                annot = line[1].split("(")[0]
+                if not gene in annots[genome_id]:
+                    annots[genome_id][gene] = {'cazy' : [annot]}
+                else:
+                    if not 'cazy' in annots[genome_id][gene]:
+                        annots[genome_id][gene]['cazy'] = [annot]
+                    else:
+                        annots[genome_id][gene]['cazy'].append(annot)
+    return(annots)
+
     
-genomes = ['SPDT00000000.1',
-           'GCA_000167675.2',
-          'GCA_000170995.2',
-          'GCA_000171015.2',
-          'GCA_001050175.1',
-          'GCA_001481775.2',
-          'GCA_002022785.1',
-          'GCA_003012105.1',
-          'GCA_003025095.1',
-          'GCA_003025105.1',
-          'GCA_003025115.1',
-          'GCA_003025155.1',
-          'GCA_004303015.1',
+genomes = ['SPDT00000000',
+           'GCA_000167675',
+          'GCA_000170995',
+          'GCA_000171015',
+          'GCA_001050175',
+          'GCA_001481775',
+          'GCA_002022785',
+          'GCA_003012105',
+          'GCA_003025095',
+          'GCA_003025105',
+          'GCA_003025115',
+          'GCA_003025155',
+          'GCA_004303015',
           'ICBG1054',
           'ICBG1065',
           'ICBG1075',
@@ -185,9 +206,14 @@ all_annots_out = open('all_annotations.txt', 'w')
 
 for genome_id in genomes:
 
-    files = glob.glob("*/*" + genome_id + "*")
+    
 
-    ## get file names 
+    files = glob.glob("*/*" + genome_id + "*")
+    print(genome_id)
+
+    
+    ## get file names
+    cazy = [x for x in files if 'cazy' in x][0]
     interpro  = [x for x in files if 'interpro' in x][0]
     led       = [x for x in files if 'LED' in x][0]
     merops    = [x for x in files if 'merops' in x][0]
@@ -197,6 +223,7 @@ for genome_id in genomes:
     
     ## get annotations
     annots = parse_interproscan(interpro = interpro, genome_id = genome_id)
+    annots = parse_cazy(cazy = cazy, annots = annots, genome_id = genome_id)
     annots = parse_blast(annots = annots, file_in = led, genome_id = genome_id, tool = 'LED')
     annots = parse_blast(annots = annots, file_in = merops, genome_id = genome_id, tool = 'MEROPS')
     annots = parse_card(annots = annots, card = card, genome_id = genome_id)
@@ -252,9 +279,10 @@ for o in orth:
                 continue
     for x in annot:
         if len(annot[x]) > 1:
-            ann = ",".join(str(annot[x]))
+            join_annot = [str(x) for x in annot[x]]
+            ann = ",".join(join_annot)
         else:
-            ann = annot[x][0]
+            ann = str(annot[x][0])
         o_annot_out.write(("{ortho} {genomes} {tool} {annot}\n".format(ortho = o, genomes = ",".join(genomes), tool = x, annot = ann)))
     
 o_annot_out.close()
