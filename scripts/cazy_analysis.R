@@ -2,11 +2,12 @@ source('~/scripts/theme_kirsten.R')
 library(pheatmap)
 library(RColorBrewer)
 library(tidyverse)
-library(ggfortify)
 library(vegan)
-library(ggord)
 
-cazy_files <- list.files('annotation/cazy', full.names = TRUE)
+
+
+
+cazy_files <- list.files('annotation/cazy/eCAMIout', full.names = TRUE)
 metadata <- read_csv('tables/metadata.csv') %>%
   mutate(acc = sub("\\..*$", "", acc)) %>%
   select(acc, genus_species, Agriculture, contains('cazyme_groups')) %>%
@@ -15,32 +16,31 @@ metadata <- read_csv('tables/metadata.csv') %>%
 
 fam_db <- read_tsv('annotation/CAZyDB.07312018.fam-activities.txt', comment = '#', col_names = c('cazy_base', 'cazy_description'))
 
+
+c <- cazy_files[1]
+
+
 cazy <- lapply(cazy_files, function(c){
-  read_tsv(c) %>%
-    mutate(genome = sub(".txt", "", basename(c)))
+  read_tsv(c, col_names = c('gene', 'family', 'subfamily')) %>%
+    mutate(gene = sub(" .*$", "", gene)) %>%
+    mutate(genome = basename(c))    %>%
+    mutate(genome = paste(strsplit(genome, split = "_")[[1]][c(1,2)], collapse = "_")) %>%
+    mutate(genome = sub("\\..*$", "", genome)) %>%
+    mutate(cazyme = gsub('\\|[0-9]\\..*$', '', subfamily)) %>% ## remove counts    
+    mutate(cazyme = sub("\\|.*$", '', cazyme)) %>%
+    mutate(cazyme = gsub(':[0-9]+', '', cazyme)) %>% ## remove counts
+    mutate(ec = stringr::str_extract_all(subfamily, '\\|[0-9\\.:]+\\|')) %>%
+    mutate(ec = sapply(ec, paste, collapse='')) %>%
+    mutate(ec = gsub(':[0-9]+', '', ec)) %>%
+    mutate(ec = gsub('\\|\\|', ",", ec)) %>%
+    mutate(ec = gsub('\\|', '', ec))## remove counts
 }) %>% bind_rows() %>%
-  separate(HMMER, into = c('hmmer', 'startstop'), sep = "\\(", remove = FALSE) %>%
-  separate(startstop, into = c('start', 'stop'), sep = '-') %>%
-  mutate(stop = sub("\\)", "", stop)) %>%
-  mutate(HMMER = gsub('\\([0-9-]+\\)', "", HMMER)) %>%
-  select(-hmmer) %>%
-  rename(gene = `Gene ID`) %>%
-  gather(tool, cazy_id, -gene, -start, -stop, -`#ofTools`, -genome) %>%
-  group_by(gene) %>%
-  mutate(cazy_ids = paste(unique(cazy_id), collapse = ",")) %>%
-  select(-tool, -cazy_id, -`#ofTools`) %>%
-  unnest(cazy_id = strsplit(cazy_ids, ",")) %>%
-  unnest(cazy = strsplit(cazy_id, "\\+")) %>%
-  select(gene, genome, cazy) %>%
   distinct() %>%
-  filter(cazy != 'N') %>%
-  mutate(cazy_base = sub("_.*$", "", cazy)) %>%
-  left_join(., fam_db, by = 'cazy_base') %>%
-  group_by(genome, cazy) %>%
+  group_by(genome, cazyme) %>%
   mutate(n_genes = as.numeric(length(unique(gene)))) %>%
   ungroup() %>%
   group_by(genome, gene) %>%
-  mutate(n_cazy = as.numeric(length(unique(cazy)))) %>%
+  mutate(n_cazy = as.numeric(length(unique(cazyme)))) %>%
   ungroup() %>%
   rename('acc' = genome) %>%
   left_join(., metadata, by = 'acc') 
@@ -50,14 +50,14 @@ cazy <- lapply(cazy_files, function(c){
 write_csv(cazy, path = 'tables/cazy_annotation.csv')
 
 c_heat <- cazy %>%
-  select(-gene, -n_cazy, -cazy_base, -cazy_description, -Agriculture, -acc, -contains('cazyme_groups')) %>%
+  select(-gene, -subfamily, -family, -n_cazy, -ec, -Agriculture, -acc, -contains('cazyme_groups')) %>%
   distinct() %>%
   spread(genus_species, n_genes) %>%
   data.frame()
 c_heat[is.na(c_heat)] <- 0
 
-rownames(c_heat) <- c_heat$cazy
-c_heat$cazy <- NULL
+rownames(c_heat) <- c_heat$cazyme
+c_heat$cazyme <- NULL
 
 c_heat <- t(c_heat)
 
@@ -212,15 +212,15 @@ ggplot(data2, aes(x = MDS1, y = MDS2, color = Agriculture)) +
 ## find interesting cazymes by groups
 caz_interest <- cazy %>%
   select(-gene) %>%
-  select(-n_cazy, -cazy_base, -cazy_description, -Agriculture, -acc, -genus_species, -cazyme_groups1) %>%
+  select(-n_cazy, -Agriculture, -family, -ec, -subfamily, -acc, -genus_species, -cazyme_groups1) %>%
   distinct() %>%
-  group_by(cazyme_groups2, cazy) %>%
+  group_by(cazyme_groups2, cazyme) %>%
   mutate(n_genes = signif(mean(n_genes), digits =2)) %>%
   ungroup() %>%
   distinct() %>%
   spread(cazyme_groups2, n_genes) %>%
   replace_na(list(Coral1 = 0, FFA = 0, Lower = 0, Outgroup1 = 0, Outgroup2 = 0)) %>%
-  gather(treatments, values, -cazy, -Outgroup2) %>%
+  gather(treatments, values, -cazyme, -Outgroup2) %>%
   mutate(diff = abs(values-Outgroup2)) %>%
   filter(diff >= 5) %>%
   select(-diff) %>%
@@ -228,20 +228,20 @@ caz_interest <- cazy %>%
   replace_na(list(Coral1 = 0, FFA = 0, Lower = 0, Outgroup1 = 0, Outgroup2 = 0)) %>%
   data.frame() %>% 
   distinct() %>%
-  .$cazy
+  .$cazyme
 
 c_sum <- cazy %>%
-  select(-n_cazy, -gene) %>%
-  select(-cazy_base, -cazy_description, -Agriculture, -acc, -contains('cazyme_groups')) %>%
+  select(-n_cazy, -gene, -ec, -contains('family')) %>%
+  select(-Agriculture, -acc, -contains('cazyme_groups')) %>%
   distinct() %>%
   spread(genus_species, n_genes) %>%
-  filter(cazy %in% caz_interest) %>%
+  filter(cazyme %in% caz_interest) %>%
   data.frame()
 
 c_sum[is.na(c_sum)] <- 0
 
-rownames(c_sum) <- c_sum$cazy
-c_sum$cazy <- NULL
+rownames(c_sum) <- c_sum$cazyme
+c_sum$cazyme <- NULL
 
 
 
@@ -250,7 +250,15 @@ c_sum$cazy <- NULL
 breaks = c(0, 5, 10, 15, 20, 25, max(c_sum))
 colors <- colorRampPalette(brewer.pal(n = 7, name ="Blues"))(length(breaks)-1)
 
-annotation_row = metadata %>% select(genus_species, cazyme_groups2) %>%
+ag_colours <- list(Agriculture = c("Coral" = "#CE3DD0",
+                "Higher" = "#2D71F6",
+                "Lower" = "#FFFEAB",
+                "Leafcutter" = "#377D22",
+                "Outgroup1" = 'black',
+                "Outgroup2" = 'gray'))
+
+annotation_row = metadata %>% 
+  select(genus_species, Agriculture) %>%
   column_to_rownames(var = "genus_species")
 
 pheatmap(as.matrix(t(c_sum)[metadata$genus_species, ]),
@@ -264,11 +272,19 @@ pheatmap(as.matrix(t(c_sum)[metadata$genus_species, ]),
          color = colors,
          display_numbers = TRUE,
          number_format = "%.0f",
-         annotation_row = annotation_row)
+         annotation_row = annotation_row,
+         annotation_colors = ag_colours)
 
 
 
-
+cazy %>% select(ec, cazyme) %>% 
+  filter(cazyme %in% caz_interest) %>%
+  distinct() %>% 
+  group_by(cazyme) %>%
+  summarize(ec = paste(ec, collapse = ',')) %>%
+  mutate(cazy_base = sub("_.*$", "", cazyme)) %>%
+  left_join(., fam_db, by = "cazy_base") %>%
+  write_csv(., path = 'tables/cazymes_interest.csv')
 
 
 
