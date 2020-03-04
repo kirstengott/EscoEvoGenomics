@@ -1,9 +1,12 @@
 # EscoEvoGenomics
 
-colors =  c('Lower' = '#FFFEAB',
-            'Coral' = "#CE3DD0",
-            'Higher' = "#2D71F6",
-            'Leafcutter' = "#377D22")
+
+colors <- c("Coral" = "#CE3DD0",
+                "Higher" = "#2D71F6",
+                "Lower" = "#b8860b",
+                "Leafcutter" = "#377D22",
+                "Outgroup1" = 'black',
+                "Outgroup2" = 'gray')
 
 Lower = 255, 253, 171
 Coral = 206, 61, 208

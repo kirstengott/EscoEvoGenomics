@@ -3,10 +3,28 @@ library(tidyverse)
 library(pheatmap)
 library(RColorBrewer)
 library(VennDiagram)
+library(UpSetR)
 
 annot <- read_tsv('annotation/all_annotations.txt', col_names = c('acc', 'gene', 'tool', 'annot'))
 
 meta <- read_csv('tables/metadata.csv')
+
+
+all_gene_id_files <- list.files('annotation/fastortho/proteins/', pattern = 'gene_ids', full.names = TRUE)
+
+all_gene_ids <- lapply(all_gene_id_files, function(x){
+  ids <- scan(x, what = 'character')
+  data.frame(gene = ids, genome = rep(basename(x), length(ids)), stringsAsFactors = FALSE) %>%
+    mutate(acc = case_when(
+      grepl('GCA_004303015', genome) ~ 'GCA_004303015.1',
+      grepl('GCA', genome) ~ paste(strsplit(genome, split = "_")[[1]][c(1,2)], collapse = "_"),
+      grepl("SPDT00000000.1_genomic", genome) ~ "SPDT00000000",
+      grepl('LGSR', genome) ~ "LGSR00000000",
+      grepl('.fasta_gene_ids', genome) ~ sub(".all.maker.proteins.fasta_gene_ids", '', genome),
+      TRUE ~ genome
+    )) %>%
+    select(-genome) 
+}) %>% bind_rows()
 
 ortho_full <- read_csv('annotation/fastortho/orthologues_full.csv', col_names = c('OrthoGroup', 'genome', 'gene')) %>%
   group_by(genome) %>%
@@ -20,39 +38,70 @@ ortho_full <- read_csv('annotation/fastortho/orthologues_full.csv', col_names = 
   )) %>%
   ungroup() %>%
   select(-genome) %>%
-  left_join(., meta, by = 'acc')
+  full_join(all_gene_ids, ., by = c('gene', 'acc')) %>%
+  left_join(., meta, by = 'acc') %>%
+  mutate(orthology_meta = ifelse(is.na(OrthoGroup),
+                                 yes = gene,
+                                 no = OrthoGroup))
 
 
-venn <- ortho_full %>% select(OrthoGroup, genus_species) %>%
-  mutate(group = case_when(
-    grepl('Trichoderma', genus_species) ~ 'Trichoderma',
-    grepl('Clado', genus_species) ~ 'Cladobotryum_Hypomyces',
-    grepl('Hypo', genus_species) ~ 'Cladobotryum_Hypomyces',
-    TRUE ~ 'Escovopsis'
-   )) #%>% 
-  # group_by(OrthoGroup) %>%
-  # mutate(number_groups = length(unique(group))) %>%
-  # ungroup()
+## compare the three pangenomes of the three clades
 
-esco_set <- venn %>% filter(group == 'Escovopsis') %>% .$OrthoGroup
-ch_set <- venn %>% filter(group == 'Cladobotryum_Hypomyces') %>% .$OrthoGroup
-t_set <- venn %>% filter(group == 'Trichoderma') %>% .$OrthoGroup
 
-sum(length(esco_set), length(ch_set), length(t_set))
 
-myCol <- brewer.pal(3, "Set1")
+groups <- c('Trichoderma', 'Hypomyces/Cladobotryum', 'Escovopsis')
+
+venn <- lapply(groups, function(x){
+  if(x %in% c('Escovopsis', 'Trichoderma')){
+    cutoff <- trunc(length(which(meta$clade_groups %in% x)) *.95)
+  } else{
+    cutoff <- length(which(meta$clade_groups %in% x))
+  }
+  ortho_full %>% 
+    filter(clade_groups %in% x) %>%
+    group_by(orthology_meta) %>%
+    mutate(n_genomes = length(unique(genus_species))) %>%
+    ungroup() %>%
+    filter(n_genomes >= cutoff)
+}) %>% bind_rows() %>%
+  select(orthology_meta, clade_groups, n_genomes) %>%
+  distinct() %>%
+  group_by(clade_groups, orthology_meta) %>%
+  summarize(genome_count = sum(n_genomes)) %>%
+  ungroup()
+
+
+esco_set <- venn %>% filter(clade_groups == 'Escovopsis') %>% .$orthology_meta %>% unique()
+ch_set   <- venn %>% filter(clade_groups == 'Hypomyces/Cladobotryum') %>% .$orthology_meta %>% unique()
+t_set    <- venn %>% filter(clade_groups == 'Trichoderma') %>% .$orthology_meta %>% unique()
+
+listInput <- list('Escovopsis' = esco_set, 
+                  'Hypomyces/Cladobotryum' = ch_set,
+                  'Trichoderma' = t_set)
+
+upset(fromList(listInput), order.by = "freq", 
+      point.size = 3.5, 
+      line.size = 1.5, 
+      text.scale = c(1.3, 1.3, 1, 1, 2, 0.75),
+      mb.ratio = c(0.8, 0.2),
+      empty.intersections = "on")
+
+data.frame(Escovopsis = length(esco_set),
+           Overlap = length(intersect(which(esco_set %in% ch_set), which(esco_set %in% t_set)))) %>%
+  gather(set, n_genes) %>%
+  ggplot(aes(y = n_genes, x = set, fill = set)) + geom_col() +
+  theme_minimal()
+
+
 venn.diagram(
-  x = list(esco_set, ch_set, t_set),
+  x = list('Escovopsis' = esco_set, 'Hypomyces/Cladobotryum' = ch_set, 'Trichoderma' = t_set),
   height = 3000,
   width = 3000,
-  category.names = c(paste0("Escovopsis\n(", n_distinct(esco_set), " Orthologues across ", n_distinct(filter(venn, group == 'Escovopsis')%>% .$genus_species), " genomes)"),
-                     paste0("Cladobotryum_Hypomyces\n(", n_distinct(ch_set), " Orthogroups across ", n_distinct(filter(venn, group == 'Cladobotryum_Hypomyces')%>% .$genus_species), " genomes)"), 
-                     paste0("Trichoderma\n(", n_distinct(t_set), " Orthogroups across ", n_distinct(filter(venn, group == 'Trichoderma')%>% .$genus_species), " genomes)")),
+   category.names = c(paste0("Escovopsis\n(", n_distinct(esco_set), " Orthologues across ", nrow(filter(meta, clade_groups == 'Escovopsis')), " genomes)"),
+                      paste0("Cladobotryum_Hypomyces\n(", n_distinct(ch_set), " Orthogroups across ", nrow(filter(meta, clade_groups == 'Hypomyces/Cladobotryum')), " genomes)"), 
+                      paste0("Trichoderma\n(", n_distinct(t_set), " Orthogroups across ", nrow(filter(meta, clade_groups == 'Trichoderma')), " genomes)")),
   filename = 'plots/shared_genes_venn_diagramm.png',
-  main = paste(n_distinct(venn$OrthoGroup), 'Orthogroups'),
   resolution = 300,
-  # Circles
-  fill = myCol,
   # Numbers
   fontface = "bold",
   fontfamily = "sans",
