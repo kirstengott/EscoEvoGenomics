@@ -138,7 +138,7 @@ annotation_row = data.frame(
 pheatmap::pheatmap(all_bgc_s[rows_order,],
                    legend = FALSE,
                    color = c('grey87', 'black'),
-                   cluster_rows = clusters,
+                   cluster_rows = TRUE,
                    cluster_cols = TRUE,
                    border_color = "grey70",
                    cellwidth = 10,
