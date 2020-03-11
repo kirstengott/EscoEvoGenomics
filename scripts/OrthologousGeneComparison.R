@@ -4,6 +4,7 @@ library(pheatmap)
 library(RColorBrewer)
 library(VennDiagram)
 library(UpSetR)
+library('ComplexHeatmap')
 
 annot <- read_tsv('annotation/all_annotations.txt', col_names = c('acc', 'gene', 'tool', 'annot'))
 
@@ -75,22 +76,29 @@ esco_set <- venn %>% filter(clade_groups == 'Escovopsis') %>% .$orthology_meta %
 ch_set   <- venn %>% filter(clade_groups == 'Hypomyces/Cladobotryum') %>% .$orthology_meta %>% unique()
 t_set    <- venn %>% filter(clade_groups == 'Trichoderma') %>% .$orthology_meta %>% unique()
 
-listInput <- list('Escovopsis' = esco_set, 
+listInput <- make_comb_mat(list('Escovopsis' = esco_set, 
                   'Hypomyces/Cladobotryum' = ch_set,
-                  'Trichoderma' = t_set)
+                  'Trichoderma' = t_set))
+set_name(listInput)
 
-upset(fromList(listInput), order.by = "freq", 
-      point.size = 3.5, 
-      line.size = 1.5, 
-      text.scale = c(1.3, 1.3, 1, 1, 2, 0.75),
-      mb.ratio = c(0.8, 0.2),
-      empty.intersections = "on")
-
+pdf("plots/orthologues_upset.pdf", width = 8, height = 8)
+ UpSet(t(listInput))#, order.by = "freq", 
+#       point.size = 3.5, 
+#       line.size = 1.5, 
+#       text.scale = c(1.3, 1.3, 1, 1, 2, 0.75),
+#       mb.ratio = c(0.8, 0.2),
+#       empty.intersections = "on")
+dev.off()
+ 
+ ## Keep this as it show a combination of the set size of esco, with the intersection size with the others
 data.frame(Escovopsis = length(esco_set),
            Overlap = length(intersect(which(esco_set %in% ch_set), which(esco_set %in% t_set)))) %>%
   gather(set, n_genes) %>%
-  ggplot(aes(y = n_genes, x = set, fill = set)) + geom_col() +
-  theme_minimal()
+  ggplot(aes(y = n_genes, x = set)) + geom_col(fill = 'black') +
+  theme_minimal() + 
+  labs(y = 'Number of Orthologous Gene Groups', 
+       x = '') +
+  ggsave('plots/esco_v_overlap_barchart.pdf', width = 5, height = 7)
 
 
 venn.diagram(
