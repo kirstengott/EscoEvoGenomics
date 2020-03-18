@@ -4,7 +4,7 @@ library(pheatmap)
 library(RColorBrewer)
 library(VennDiagram)
 library(UpSetR)
-library('ComplexHeatmap')
+#library('ComplexHeatmap')
 
 annot <- read_tsv('annotation/all_annotations.txt', col_names = c('acc', 'gene', 'tool', 'annot'))
 
@@ -51,8 +51,13 @@ ortho_full <- read_csv('annotation/fastortho/orthologues_full.csv', col_names = 
 
 
 groups <- c('Trichoderma', 'Hypomyces/Cladobotryum', 'Escovopsis')
+ag <- c("Lower",
+         "Coral",
+         "Higher",
+         "Leafcutter")
 
-venn <- lapply(groups, function(x){
+
+venn1 <- lapply(groups, function(x){
   if(x %in% c('Escovopsis', 'Trichoderma')){
     cutoff <- trunc(length(which(meta$clade_groups %in% x)) *.95)
   } else{
@@ -72,31 +77,105 @@ venn <- lapply(groups, function(x){
   ungroup()
 
 
-esco_set <- venn %>% filter(clade_groups == 'Escovopsis') %>% .$orthology_meta %>% unique()
-ch_set   <- venn %>% filter(clade_groups == 'Hypomyces/Cladobotryum') %>% .$orthology_meta %>% unique()
-t_set    <- venn %>% filter(clade_groups == 'Trichoderma') %>% .$orthology_meta %>% unique()
+venn <- lapply(ag, function(x){
+  cutoff <- trunc(length(which(meta$Agriculture %in% x)) *.95)
+  ortho_full %>% 
+    filter(Agriculture %in% x) %>%
+    group_by(orthology_meta) %>%
+    mutate(n_genomes = length(unique(genus_species)))%>%
+    ungroup() %>%
+    filter(n_genomes >= cutoff)
+}) %>% bind_rows() %>%
+  select(orthology_meta, Agriculture, n_genomes) %>%
+  distinct() %>%
+  group_by(Agriculture, orthology_meta) %>%
+  summarize(genome_count = sum(n_genomes)) %>%
+  ungroup() %>%
+  rename('clade_groups' = Agriculture) %>%
+  bind_rows(., venn1)
 
-listInput <- make_comb_mat(list('Escovopsis' = esco_set, 
-                  'Hypomyces/Cladobotryum' = ch_set,
-                  'Trichoderma' = t_set))
-set_name(listInput)
 
-pdf("plots/orthologues_upset.pdf", width = 8, height = 8)
- UpSet(t(listInput))#, order.by = "freq", 
-#       point.size = 3.5, 
-#       line.size = 1.5, 
-#       text.scale = c(1.3, 1.3, 1, 1, 2, 0.75),
-#       mb.ratio = c(0.8, 0.2),
-#       empty.intersections = "on")
+write_csv(venn, path = 'tables/clade_orthogroup_venn.csv')
+
+
+# esco_set <- venn %>% filter(clade_groups == 'Escovopsis') %>% .$orthology_meta %>% unique()
+# ch_set   <- venn %>% filter(clade_groups == 'Hypomyces/Cladobotryum') %>% .$orthology_meta %>% unique()
+# t_set    <- venn %>% filter(clade_groups == 'Trichoderma') %>% .$orthology_meta %>% unique()
+
+listInput <- lapply(c(groups, ag), 
+                    function(x){
+                      venn %>% filter(clade_groups == x) %>% .$orthology_meta %>% unique()
+                    })
+
+names(listInput) <- c(groups, ag)
+
+listInput[['AllOutgroup']] <- c(listInput$Trichoderma, listInput$`Hypomyces/Cladobotryum`)
+
+# listInput <- list('Escovopsis' = esco_set,
+#                   'Hypomyces/Cladobotryum' = ch_set,
+#                   'Trichoderma' = t_set)
+# set_name(listInput)
+
+pdf("plots/orthologues_upset_summary.pdf", width = 8, height = 8)
+upset(fromList(listInput), order.by = "freq", 
+      sets = c(groups),
+       point.size = 3.5, 
+       line.size = 1.5, 
+       text.scale = c(1.3, 1.3, 1, 1, 2, 0.75),
+       mb.ratio = c(0.8, 0.2))
+dev.off()
+
+pdf("plots/orthologues_upset_subset.pdf", width = 8, height = 8)
+
+#list('Lower','Coral','Higher','Leafcutter','AllOutgroup')
+
+pdf("plots/orthologues_upset_subset.pdf", width = 8, height = 8)
+upset(fromList(listInput), order.by = "freq", 
+      sets = c(ag, 'AllOutgroup'),
+      intersections = list(
+        list('Lower','Higher','Leafcutter','AllOutgroup'),
+        list('Higher', "Leafcutter"),
+        list('Lower', 'AllOutgroup'),
+        list('Coral', 'Higher', 'Lower', 'AllOutgroup'),
+        list('Coral', 'Higher', 'Leafcutter', 'AllOutgroup'),
+        list('Coral', 'Lower', 'Leafcutter', 'AllOutgroup'),
+        list('Lower','Coral', 'AllOutgroup'),
+        list('Higher','Leafcutter','AllOutgroup'),
+        list('Leafcutter'),
+        list('Lower'),
+        list('Lower','Higher','AllOutgroup'),
+        list('Lower','Coral','Higher','Leafcutter'),
+        list('Lower','Leafcutter','AllOutgroup')
+      ),
+      point.size = 3.5, 
+      line.size = 1.5, 
+      text.scale = c(1.3, 1.3, 1, 1, 2, 0.75),
+      mb.ratio = c(0.8, 0.2))
+dev.off()
+
+pdf("plots/orthologues_upset_all.pdf", width = 8, height = 8)
+upset(fromList(listInput), order.by = "freq", 
+      sets = c(ag, 'AllOutgroup'),
+      point.size = 3.5, 
+      line.size = 1.5, 
+      text.scale = c(1.3, 1.3, 1, 1, 2, 0.75),
+      mb.ratio = c(0.8, 0.2))
 dev.off()
  
  ## Keep this as it show a combination of the set size of esco, with the intersection size with the others
-data.frame(Escovopsis = length(esco_set),
-           Overlap = length(intersect(which(esco_set %in% ch_set), which(esco_set %in% t_set)))) %>%
-  gather(set, n_genes) %>%
-  ggplot(aes(y = n_genes, x = set)) + geom_col(fill = 'black') +
+set_data <- data.frame(
+  'Hypomyces.Cladobotryum' = length(listInput$`Hypomyces/Cladobotryum`),
+  Trichoderma = length(listInput$Trichoderma),
+  Escovopsis = length(listInput$Escovopsis),
+           Overlap = length(intersect(which(listInput$Escovopsis %in% listInput$`Hypomyces/Cladobotryum`), 
+                                      which(listInput$Escovopsis %in% listInput$Trichoderma)))) %>%
+  gather(set, n_genes)
+
+set_data$set <- factor(set_data$set, levels =c('Trichoderma', 'Hypomyces.Cladobotryum', 'Escovopsis', 'Overlap'))
+
+ggplot(set_data, aes(y = n_genes, x = set)) + geom_col(fill = 'black') +
   theme_minimal() + 
-  labs(y = 'Number of Orthologous Gene Groups', 
+  labs(y = 'Number of Orthologous Genes per Clade', 
        x = '') +
   ggsave('plots/esco_v_overlap_barchart.pdf', width = 5, height = 7)
 
@@ -126,50 +205,50 @@ venn.diagram(
 
 
 
-ortho_annot <- ortho_full %>%
-  mutate(cazy = ifelse(gene %in% cazy,
-                       yes = 'cazy',
-                       no = NA)) %>%
-  mutate(card = ifelse(gene %in% card,
-                       yes = 'card',
-                       no = NA)) %>%
-  select(-gene, -genome) %>%
-  filter(!is.na(cazy) | !is.na(card)) %>%
-  group_by(OrthoGroup) %>%
-  mutate(annotation = paste(na.omit(c(unique(cazy), unique(card))), collapse = "_")) %>%
-  ungroup()  %>%
-  select(-cazy, -card) %>%
-  distinct() %>%
-  data.frame(., stringsAsFactors = FALSE)
-  
-
-
-
-
-
-rownames(ortho_full) <- ortho_full$OrthoGroup
-ortho_full$OrthoGroup <- NULL
-
-
-ortho <- read_csv('annotation/fastortho/orthologues_presence_absence.csv')
-ortho_mat <- data.frame(ortho, stringsAsFactors = FALSE)
-rownames(ortho_mat) <- ortho$OrthoGroup
-ortho_mat$OrthoGroup <- NULL
-ortho_mat <- as.matrix(ortho_mat)
-
-
-ortho_mat[ortho_mat > 1] <- 1
-
-
-breaks = seq(0, 1)
-
-#colors_f <- colorRampPalette(colors = c('white', 'black'))
-colors <- c('white', 'black')
-
-
-annot_colors <- list(annotation = c('card' =  "#1B9E77", 'cazy' = "#D95F02", "cazy_card" = "#7570B3"))
-
-pheatmap(ortho_mat, show_rownames = FALSE, color = colors, cellwidth = 10, annotation_row = ortho_full, annotation_colors = annot_colors, 
-         annotation_names_row = FALSE, filename = 'plots/orthologous_gene_matrix.pdf')
-
-
+# ortho_annot <- ortho_full %>%
+#   mutate(cazy = ifelse(gene %in% cazy,
+#                        yes = 'cazy',
+#                        no = NA)) %>%
+#   mutate(card = ifelse(gene %in% card,
+#                        yes = 'card',
+#                        no = NA)) %>%
+#   select(-gene, -genome) %>%
+#   filter(!is.na(cazy) | !is.na(card)) %>%
+#   group_by(OrthoGroup) %>%
+#   mutate(annotation = paste(na.omit(c(unique(cazy), unique(card))), collapse = "_")) %>%
+#   ungroup()  %>%
+#   select(-cazy, -card) %>%
+#   distinct() %>%
+#   data.frame(., stringsAsFactors = FALSE)
+#   
+# 
+# 
+# 
+# 
+# 
+# rownames(ortho_full) <- ortho_full$OrthoGroup
+# ortho_full$OrthoGroup <- NULL
+# 
+# 
+# ortho <- read_csv('annotation/fastortho/orthologues_presence_absence.csv')
+# ortho_mat <- data.frame(ortho, stringsAsFactors = FALSE)
+# rownames(ortho_mat) <- ortho$OrthoGroup
+# ortho_mat$OrthoGroup <- NULL
+# ortho_mat <- as.matrix(ortho_mat)
+# 
+# 
+# ortho_mat[ortho_mat > 1] <- 1
+# 
+# 
+# breaks = seq(0, 1)
+# 
+# #colors_f <- colorRampPalette(colors = c('white', 'black'))
+# colors <- c('white', 'black')
+# 
+# 
+# annot_colors <- list(annotation = c('card' =  "#1B9E77", 'cazy' = "#D95F02", "cazy_card" = "#7570B3"))
+# 
+# pheatmap(ortho_mat, show_rownames = FALSE, color = colors, cellwidth = 10, annotation_row = ortho_full, annotation_colors = annot_colors, 
+#          annotation_names_row = FALSE, filename = 'plots/orthologous_gene_matrix.pdf')
+# 
+# 
