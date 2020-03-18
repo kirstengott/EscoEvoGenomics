@@ -24,3 +24,4 @@ ggplot(metadata, aes(x = clade_groups, y = GenomeSize)) +
   labs(x = 'Clade', 
        y = 'Genome Size') +
   ggsave('plots/genome_size_boxplot.pdf')
+
