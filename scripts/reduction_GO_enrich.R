@@ -1,6 +1,7 @@
 library(topGO)
 library(tidyverse)
 
+source('scripts/color_palettes.R')
 xx <- as.list(GOTERM)
 
 metadata <- read_csv('tables/metadata.csv')
@@ -62,10 +63,11 @@ not_ffa <- filter(annot_sum, ffa_count == 0) %>%  .$ortho %>%
 
 ortho2go_df <- annot_sum %>% 
   dplyr::select(ortho, annot) %>%
-  mutate(all_go = paste(annot, collapse = ",")) %>%
+  group_by(ortho) %>%
+  mutate(all_go = paste(unique(annot), collapse = ",")) %>%
   dplyr::select(-annot) %>%
-  distinct() %>%
-  mutate(all_go = paste(unique(strsplit(all_go, ",")[[1]]), collapse = ","))
+  distinct() #%>%
+  #mutate(all_go = paste(unique(strsplit(all_go, ",")[[1]]), collapse = ","))
 
 
 ortho2go        <- ortho2go_df$all_go
@@ -139,36 +141,63 @@ reduced_in <- ortho2go_df %>% filter(ortho %in% myInterestingGenes) %>%
   group_by(go_id, clade_groups) %>%
   mutate(num_ortho = case_when(
     clade_groups == 'Trichoderma' ~ (length(OrthoGroup)/nrow(filter(metadata, genus == 'Trichoderma'))),
-    clade_groups == 'Hypomyces/Cladobotryum' ~ (length(OrthoGroup)/nrow(filter(metadata, clade_groups == 'Hypomyces/Cladobotryum')))
+    clade_groups == 'Hypomyces_Cladobotryum' ~ (length(OrthoGroup)/nrow(filter(metadata, clade_groups == 'Hypomyces_Cladobotryum')))
   )) %>%
   mutate(ortho_pass = ifelse(num_ortho >= 10, TRUE, FALSE)) %>%
   distinct() %>%
   filter(any(ortho_pass)) %>% 
   select(go_id, clade_groups, Term, Ontol, BH.correction, num_ortho) %>% 
   distinct() %>%
-  ungroup()
+  ungroup() %>%
+  filter(Ontol != 'CC') %>%
+  mutate(Ontol = case_when(
+    Ontol == 'MF' ~ 'Molecular Function',
+    Ontol == 'BP' ~ 'Biological Process'
+  )) %>%
+  mutate(Term_s = case_when(
+    Term == "oxidoreductase activity, acting on paired donors, with incorporation or reduction of molecular oxygen" ~ "oxidoreductase activity",
+    Term == "DNA-binding transcription factor activity, RNA polymerase II-specific" ~ "DNA-binding transcription factor activity",
+    TRUE ~ Term
+  )) %>%
+  mutate(pval_s = case_when(
+    BH.correction <= 0.0001  ~ "****",
+    BH.correction <= 0.001 ~ "***",
+    BH.correction <= 0.01 ~ "**",
+    BH.correction <= 0.5 ~ "*",
+    TRUE ~ "NA"
+  ))
 
 pvals <- reduced_in %>% filter(clade_groups == 'Trichoderma') %>%
   select(-clade_groups) %>% distinct()
 
-reduced_in$Term = factor(reduced_in$Term,
-                         levels = unique(arrange(reduced_in, num_ortho)$Term))
-reduced_in %>%
-  ggplot(aes(x = Term, y = num_ortho)) +
+reduced_in$Term_s = factor(reduced_in$Term_s,
+                         levels = unique(arrange(reduced_in, num_ortho)$Term_s))
+
+write_csv(reduced_in, path = 'tables/reduced_go_terms.csv')
+
+fig <- reduced_in %>%
+  ggplot(aes(x = Term_s, y = num_ortho)) +
   geom_col(position = 'dodge', aes(fill = clade_groups)) +
-  coord_flip() +
-  theme_minimal() +
+  theme_classic() +
   xlab('GO Term') +
+  coord_flip() +
   ylab('Average Number of OrthoGroups') +
   ggtitle('GO term Enrichment of Orthogroups Lost in Escovopsis') +
-  geom_text(data = pvals, aes(y = num_ortho + 35, x = Term, label = signif(BH.correction, 3)), size = 2.5) +
-  scale_y_continuous(expand = c(0.12,0)) +
-  facet_wrap(~Ontol, nrow = 3, ncol = 1, scales = 'free_y') +
-  theme(axis.title.y = element_text(margin=margin(0,-10,0,0)),
-        axis.text.y = element_text(margin = margin(0,-20,0,0)),
-        legend.title = element_blank())   +
-  scale_fill_manual(values = c('Trichoderma' = 'black', 'Hypomyces/Cladobotryum' = 'gray'))+
-  ggsave('plots/reduction_GO_enrich.pdf', width = 10)
+  geom_text(data = pvals, aes(y = num_ortho + 20, x = Term_s, label = pval_s, angle = 90), size = 2.5) +
+  facet_wrap(~Ontol, nrow = 2, ncol = 1, scales = 'free_y', strip.position = 'left') +
+  scale_y_continuous(expand = c(0,0), limits = c(0, max(reduced_in$num_ortho)+40),
+                     breaks = seq(0, max(reduced_in$num_ortho)+40, by = 50),
+                     labels = seq(0, max(reduced_in$num_ortho)+40, by = 50)
+                     ) +
+  theme(#axis.title.y = element_text(margin=margin(0,-10,0,0)),
+        #axis.text.y = element_text(margin = margin(0,-20,0,0)),
+    panel.border = element_rect(colour = '#000000', fill = NA, size = 1),
+    legend.title = element_blank(),
+    legend.position = "none")   +
+  scale_fill_manual(values = clade_colors)
+fig
+
+fig + ggsave('plots/reduction_GO_enrich.pdf', width = 7)
 
 
 
