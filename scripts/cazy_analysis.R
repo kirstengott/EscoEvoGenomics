@@ -46,6 +46,13 @@ cazy <- lapply(cazy_files, function(c){
   left_join(., metadata, by = 'acc') 
 
 
+beta_gs <- c('GH94', 'GT2', 'GT48', 'GT84')
+cazy %>% filter(cazyme %in% beta_gs) %>% 
+  select(cazyme, n_genes, genus_species) %>%
+  distinct() %>%
+  spread(cazyme, n_genes) %>% View()
+
+
 
 write_csv(cazy, path = 'tables/cazy_annotation.csv')
 
