@@ -47,6 +47,15 @@ cazy <- lapply(cazy_files, function(c){
 
 
 
+beta_gs <- c('GH94', 'GT2', 'GT48', 'GT84')
+cazy %>% filter(cazyme %in% beta_gs) %>% 
+  select(cazyme, n_genes, genus_species) %>%
+  distinct() %>%
+  spread(cazyme, n_genes) %>% View()
+
+
+
+
 write_csv(cazy, path = 'tables/cazy_annotation.csv')
 
 c_heat <- cazy %>%
@@ -308,16 +317,6 @@ ann_colors = list(
 breaks = c(0, 5, 10, 15, 20, 25, max(c_sum))
 colors <- colorRampPalette(brewer.pal(n = 7, name ="Blues"))(length(breaks)-1)
 
-<<<<<<< HEAD
-ag_colours <- list(Agriculture = c("Coral" = "#CE3DD0",
-                "Higher" = "#2D71F6",
-                "Lower" = "#FFFEAB",
-                "Leafcutter" = "#377D22",
-                "Outgroup1" = 'black',
-                "Outgroup2" = 'gray'))
-
-=======
->>>>>>> 6c86900f39282dd5a1794d492c1a3cd702b073d5
 annotation_row = metadata %>% 
   select(genus_species, Agriculture) %>%
   column_to_rownames(var = "genus_species")

@@ -220,6 +220,7 @@ for genome_id in genomes:
     card      = [x for x in files if 'card' in x][0]
     targetp   = [x for x in files if 'targetp' in x][0]
     wolfpsort = [x for x in files if 'wolfpsort' in x][0]
+    virulence = [x for x in files if 'virulence' in x][0]
     
     ## get annotations
     annots = parse_interproscan(interpro = interpro, genome_id = genome_id)
@@ -229,6 +230,7 @@ for genome_id in genomes:
     annots = parse_card(annots = annots, card = card, genome_id = genome_id)
     annots = parse_targetp(annots = annots, targetp = targetp, genome_id = genome_id)
     annots = parse_wolfpsort(annots = annots, wolfpsort = wolfpsort, genome_id = genome_id)
+    annots = parse_blast(annots = annots, file_in = virulence, genome_id = genome_id, tool = 'virulence')
 
     for gene in annots[genome_id]:
         sub = annots[genome_id][gene]
