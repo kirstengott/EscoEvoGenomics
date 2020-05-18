@@ -2,9 +2,11 @@ library(topGO)
 library(tidyverse)
 
 source('scripts/color_palettes.R')
+
 xx <- as.list(GOTERM)
 
-metadata <- read_csv('tables/metadata.csv')
+metadata <- read_csv('tables/metadata.csv') %>% 
+  filter(!is.na(genome_id))
 
 
 ffa <- metadata %>% filter(!grepl('Outgroup', Agriculture)) %>% .$acc
@@ -17,17 +19,38 @@ clad  <- metadata %>% filter(grepl('Outgroup1', Agriculture)) %>% .$acc %>%
 
 
 annots_all <- read_tsv('annotation/all_annotations.txt', 
-                         col_names = c('genome', 'gene', 'tool' ,'annot'))
+                         col_names = c('genome', 'gene', 'tool' ,'annot')) %>%
+  filter(genome != 'genome')
 
-all_ortho <- read_csv('annotation/fastortho/orthologues_full.csv',
-                      col_names = c('ortho', 'genome', 'gene'))
+
+
+
+
+
+load('rdata/orthologues_long.rdata')
+
+all_ortho <- orthog_long %>% dplyr::rename('gene' = genes) %>%
+  filter(genome != "GCA_000225605.1_CmilitarisCM01_v01_protein", !is.na(gene)) %>%
+  mutate(genome = sub('\\..*$', '', genome))
+rm(orthog_long)
+
 id_map         <- sapply(unique(annots_all$genome), grep, x = unique(all_ortho$genome), value = TRUE)
 id_map1        <- names(id_map)
 names(id_map1) <- id_map
+
+
+## make sure all of the genomes are in the annotation (will fail if not)
+lapply(unique(all_ortho$genome), function(x){
+  print(x)
+  id_map1[[x]]
+})
+
+
+
 all_ortho <- all_ortho %>%
   rowwise() %>%
   mutate(genome = id_map1[[genome]]) %>%
-  group_by(ortho) %>%
+  group_by(Orthogroup) %>%
   mutate(ffa_count = length(which(unique(genome) %in% ffa))) %>%
   mutate(trich_count = length(which(unique(genome) %in% trich))) %>%
   mutate(clad_count = length(which(unique(genome) %in% clad))) %>% 
@@ -48,22 +71,22 @@ joined_ortho <- all_ortho %>%
 annot_sum <- joined_ortho %>%
   filter(tool == 'GO') 
 
-annot_sum$ortho %>% n_distinct()
+annot_sum$Orthogroup %>% n_distinct()
 
 
 no_out <- filter(annot_sum, 
                  trich_count == 0, 
                  clad_count == 0) %>% 
-  .$ortho %>% unique() 
+  .$Orthogroup %>% unique() 
 
 
-not_ffa <- filter(annot_sum, ffa_count == 0) %>%  .$ortho %>%
+not_ffa <- filter(annot_sum, ffa_count == 0) %>%  .$Orthogroup %>%
   unique()
 
 
 ortho2go_df <- annot_sum %>% 
-  dplyr::select(ortho, annot) %>%
-  group_by(ortho) %>%
+  dplyr::select(Orthogroup, annot) %>%
+  group_by(Orthogroup) %>%
   mutate(all_go = paste(unique(annot), collapse = ",")) %>%
   dplyr::select(-annot) %>%
   distinct() #%>%
@@ -71,7 +94,7 @@ ortho2go_df <- annot_sum %>%
 
 
 ortho2go        <- ortho2go_df$all_go
-names(ortho2go) <- ortho2go_df$ortho
+names(ortho2go) <- ortho2go_df$Orthogroup
 
 ortho2go <- lapply(ortho2go, function(x){strsplit(x, ',')[[1]]})
 
@@ -131,22 +154,21 @@ enriched_leaves <- all_enrich_df %>%
   filter(!go_id %in% my_an)
 
 
-reduced_in <- ortho2go_df %>% filter(ortho %in% myInterestingGenes) %>%
+reduced_in <- ortho2go_df %>% filter(Orthogroup %in% myInterestingGenes) %>%
   mutate(all_go = strsplit(all_go, ',')) %>%
   unnest(all_go) %>%
   dplyr::rename('go_id' = all_go) %>%
   right_join(., enriched_leaves, by = 'go_id') %>%
-  left_join(., all_ortho, by = 'ortho') %>%
-  dplyr::rename('OrthoGroup' = ortho) %>%
+  left_join(., all_ortho, by = 'Orthogroup') %>%
   group_by(go_id, clade_groups) %>%
   mutate(num_ortho = case_when(
-    clade_groups == 'Trichoderma' ~ (length(OrthoGroup)/nrow(filter(metadata, genus == 'Trichoderma'))),
-    clade_groups == 'Hypomyces_Cladobotryum' ~ (length(OrthoGroup)/nrow(filter(metadata, clade_groups == 'Hypomyces_Cladobotryum')))
+    clade_groups == 'Trichoderma' ~ (length(Orthogroup)/nrow(filter(metadata, genus == 'Trichoderma'))),
+    clade_groups == 'Hypomyces_Cladobotryum' ~ (length(Orthogroup)/nrow(filter(metadata, clade_groups == 'Hypomyces_Cladobotryum')))
   )) %>%
   mutate(ortho_pass = ifelse(num_ortho >= 10, TRUE, FALSE)) %>%
   distinct() %>%
   filter(any(ortho_pass)) %>% 
-  select(go_id, clade_groups, Term, Ontol, BH.correction, num_ortho) %>% 
+  dplyr::select(go_id, clade_groups, Term, Ontol, BH.correction, num_ortho) %>% 
   distinct() %>%
   ungroup() %>%
   filter(Ontol != 'CC') %>%
@@ -168,7 +190,7 @@ reduced_in <- ortho2go_df %>% filter(ortho %in% myInterestingGenes) %>%
   ))
 
 pvals <- reduced_in %>% filter(clade_groups == 'Trichoderma') %>%
-  select(-clade_groups) %>% distinct()
+  dplyr::select(-clade_groups) %>% distinct()
 
 reduced_in$Term_s = factor(reduced_in$Term_s,
                          levels = unique(arrange(reduced_in, num_ortho)$Term_s))
