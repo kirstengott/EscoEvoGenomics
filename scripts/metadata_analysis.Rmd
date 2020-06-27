@@ -224,9 +224,32 @@ mean_mrnas
 ```
 
 
+```{r}
+stats_interest <- c("Total_cds_length")
+sub <- gff_stats %>% filter(stat %in% stats_interest)
+sub$stat <- factor(sub$stat, levels = stats_interest)
+
+total_cds <- ggplot(sub, aes(x = clade_groups, y = value, colour = clade_groups)) + 
+  geom_boxplot() + 
+  geom_jitter(alpha = 0.5) +
+  theme_classic() +
+  ylab('Total CDS Length (bp)') +
+  xlab('')+
+  theme(
+    legend.position = 'none',
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank()) +
+  scale_colour_manual(values = clade_colors)
+total_cds
+##source('scripts/make_map.R')
+##subplot(map, proteins, proteins, proteins, nrows = 2) 
+```
+
+
+
 
 ```{r}
-plot_grid(genome_size, as_len, mrna_length, mean_mrnas, number_introns, intron_length, legend, labels = 'AUTO', label_size = 14,
+plot_grid(genome_size, as_len, mrna_length, total_cds, mean_mrnas, number_introns, intron_length, legend, labels = 'AUTO', label_size = 14,
           nrow = 4, ncol = 2) + 
   ggsave2(filename = 'plots/supplementary_fig1.pdf', height = 10, width = 10)
 
@@ -234,7 +257,7 @@ plot_grid(genome_size, as_len, mrna_length, mean_mrnas, number_introns, intron_l
 
 ```{r}
 
-stats_interest <- c('Total_mrna_length', 'Number_of_intron_in_cds', 'Number_of_intron_in_cds', "Total_intron_length_per_cds", 'mean_mrna_length')
+stats_interest <- c('Total_mrna_length', "Total_cds_length", 'Number_of_intron_in_cds', 'Number_of_intron_in_cds', "Total_intron_length_per_cds", 'mean_mrna_length')
 gff_out <- gff_stats %>% filter(stat %in% stats_interest) %>%
   select(clade_groups, stat,  value) %>%
   group_by(stat, clade_groups) %>%

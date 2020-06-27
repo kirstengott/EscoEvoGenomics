@@ -1,3 +1,6 @@
+
+
+```{r}
 #library(KEGGREST)
 #library(GO.db)
 #library(GSEABase)
@@ -9,7 +12,9 @@ library(tidyverse)
 
 
 source('scripts/color_palettes.R')
+```
 
+```{r}
 annot <- read_tsv('annotation/all_annotations.txt', col_names = c('acc', 'gene', 'tool', 'annot'))
 
 meta <- read_csv('tables/metadata.csv')
@@ -39,7 +44,7 @@ load('rdata/orthologues_long.rdata')
 
 
 
-
+## join in the orthologues with singleton gene ids for each genome
 ortho_full  <- orthog_long %>% 
   filter(!is.na(genes)) %>%
   group_by(genome) %>%
@@ -53,14 +58,14 @@ ortho_full  <- orthog_long %>%
       TRUE ~ genome
     )) %>%
   ungroup() %>%
-  rename('gene' = genes) %>%
+  dplyr::rename('gene' = genes) %>%
   full_join(all_gene_ids, ., by = c('acc', 'gene')) %>%
   mutate(orthology_meta = ifelse(is.na(Orthogroup),
                                  yes = gene,
                                  no = Orthogroup)) %>%
   left_join(., meta, by = 'acc') %>%
-  filter(!is.na(clade_groups)) %>%
-  group_by(clade_groups, orthology_meta) %>%
+  filter(!is.na(Agriculture)) %>%
+  group_by(Agriculture, orthology_meta) %>%
   mutate(n_genomes = length(unique(acc))) %>%
   mutate(n_copies_per_genome = length(acc)) %>%
   ungroup()
@@ -69,7 +74,7 @@ ortho_full  <- orthog_long %>%
 
 ## compare the three pangenomes of the three clades
 
-groups <- c('Trichoderma', 'Hypomyces_Cladobotryum', 'Escovopsis')
+groups <- unique(meta$Agriculture) %>% na.omit()
 
 ag <- c("Lower",
          "Coral",
@@ -78,53 +83,65 @@ ag <- c("Lower",
 
 
 venn1 <- lapply(groups, function(x){
-  if(x %in% c('Escovopsis', 'Trichoderma')){
-    cutoff <- trunc(length(which(meta$clade_groups %in% x)) *.95)
-
+  n_g = length(which(meta$Agriculture %in% x)) 
+  if(n_g > 4){
+    cutoff <- trunc(n_g *.95)
   } else{
-    cutoff <- length(which(meta$clade_groups %in% x))
+    cutoff <- n_g  # must be in all of the genomes if there are less than 5 representatives
   }
   ortho_full %>% 
-    filter(clade_groups %in% x) %>%
+    filter(Agriculture %in% x) %>%
     filter(n_genomes >= cutoff)
 }) %>% bind_rows() %>%
-  select(orthology_meta, clade_groups, n_genomes) %>%
+  dplyr::select(orthology_meta, clade_groups, Agriculture, n_genomes) %>%
   distinct() %>%
-  group_by(clade_groups, orthology_meta) %>%
+  group_by(clade_groups, Agriculture, orthology_meta) %>%
   summarize(genome_count = sum(n_genomes)) %>%
   ungroup()
 
 
-venn <- lapply(ag, function(x){
-  cutoff <- trunc(length(which(meta$Agriculture %in% x)) *.95)
-  ortho_full %>% 
-    filter(Agriculture %in% x) %>%
-    group_by(orthology_meta) %>%
-    mutate(n_genomes = length(unique(genus_species)))%>%
-    ungroup() %>%
-    filter(n_genomes >= cutoff)
-}) %>% bind_rows() %>%
-  select(orthology_meta, Agriculture, n_genomes) %>%
-  distinct() %>%
-  group_by(Agriculture, orthology_meta) %>%
-  summarize(genome_count = sum(n_genomes)) %>%
-  ungroup() %>%
-  rename('clade_groups' = Agriculture) %>%
-  bind_rows(., venn1)
+venn1 %>%
+  group_by(clade_groups) %>%
+  summarize(mean(genome_count))
+
+venn <- venn1
+remove(venn1)
+
+
+# venn <- lapply(ag, function(x){
+#   cutoff <- trunc(length(which(meta$Agriculture %in% x)) *.95)
+#   ortho_full %>% 
+#     filter(Agriculture %in% x) %>%
+#     group_by(orthology_meta) %>%
+#     mutate(n_genomes = length(unique(genus_species)))%>%
+#     ungroup() %>%
+#     filter(n_genomes >= cutoff)
+# }) %>% bind_rows() %>%
+#   select(orthology_meta, Agriculture, n_genomes) %>%
+#   distinct() %>%
+#   group_by(Agriculture, orthology_meta) %>%
+#   summarize(genome_count = sum(n_genomes)) %>%
+#   ungroup() %>%
+#   rename('clade_groups' = Agriculture) %>%
+#   bind_rows(., venn1)
 
 
 write_csv(venn, path = 'tables/clade_orthogroup_venn.csv')
 
 
 
-listInput <- lapply(c(groups, ag), 
+listInput <- lapply(c(groups), 
                     function(x){
-                      venn %>% filter(clade_groups == x) %>% .$orthology_meta %>% unique()
+                      venn %>% filter(Agriculture == x) %>% .$orthology_meta %>% unique()
                     })
 
-names(listInput) <- c(groups, ag)
+names(listInput) <- c(groups)
+lapply(listInput, head)
 
-listInput[['AllOutgroup']] <- c(listInput$Trichoderma, listInput$Hypomyces_Cladobotryum)
+
+listInput[['AllOutgroup']] <- sort(unique(c(listInput$Trichoderma, listInput$Hypomyces_Cladobotryum)))
+listInput[['Escovopsis']] <- sort(unique(c(listInput$Coral, listInput$Higher, listInput$Leafcutter, listInput$Lower)))
+
 
 # listInput <- list('Escovopsis' = esco_set,, 
 #                   'Hypomyces/Cladobotryum' = ch_set,
@@ -133,9 +150,9 @@ listInput[['AllOutgroup']] <- c(listInput$Trichoderma, listInput$Hypomyces_Clado
 
 lapply(listInput, head)
 
-pdf("plots/orthologues_upset_summary.pdf", width = 8, height = 8)
+pdf("plots/orthologues_upset_summary.pdf", width = 15, height = 8)
 upset(fromList(listInput), order.by = "freq", 
-      sets = c(groups),
+      sets = c('AllOutgroup', 'Lower','Coral','Higher','Leafcutter'),
        point.size = 3.5, 
        line.size = 1.5, 
        text.scale = c(1.3, 1.3, 1, 1, 2, 0.75),
@@ -144,11 +161,12 @@ dev.off()
 
 #pdf("plots/orthologues_upset_subset.pdf", width = 8, height = 8)
 
-#list('Lower','Coral','Higher','Leafcutter','AllOutgroup')
+
 
 pdf("plots/orthologues_upset_subset.pdf", width = 8, height = 8)
 upset(fromList(listInput), order.by = "freq", 
-      sets = c(ag, 'AllOutgroup'),
+      keep.order = TRUE,
+      sets = c('AllOutgroup', 'Lower','Coral','Higher','Leafcutter'),
       intersections = list(
         list('Lower','Higher','Leafcutter','AllOutgroup'),
         list('Higher', "Leafcutter"),
@@ -185,7 +203,7 @@ set_data <- data.frame(
   'Hypomyces_Cladobotryum' = length(listInput$`Hypomyces_Cladobotryum`),
   Trichoderma = length(listInput$Trichoderma),
   Escovopsis = length(listInput$Escovopsis),
-           Overlap = length(intersect(which(listInput$Escovopsis %in% listInput$`Hypomyces_Cladobotryum`), 
+           Overlap = length(union(which(listInput$Escovopsis %in% listInput$`Hypomyces_Cladobotryum`), 
                                       which(listInput$Escovopsis %in% listInput$Trichoderma)))) %>%
   gather(set, n_genes)
 
@@ -211,12 +229,10 @@ ggplot(set_data, aes(y = n_genes, x = set, fill = set)) +
 
 
 
+```
 
 
-
-
-
-
+```{r}
 ###############
 ## ADD in functional annotations to our shared orthogroups
 #################
@@ -225,7 +241,7 @@ ggplot(set_data, aes(y = n_genes, x = set, fill = set)) +
 fais <- list.files('annotation/proteins/', pattern = 'fai', full.names = TRUE)
 aa_lengths <- lapply(fais, function(x){
   read_tsv(x, col_names = c('gene', 'length', NA, NA, NA)) %>%
-    select(-contains('X'))
+    dplyr::select(-contains('X'))
 }) %>% bind_rows()
 
 groups = list(c('Higher', 'Leafcutter', 'Lower', 'AllOutgroup'),
@@ -540,29 +556,31 @@ nmds %>%
 
 
 
+```
 
 
 
-## Analysis ends here! Nothing gets enriched
-
-
+```{r groupEnrichment, eval = FALSE}
+library(topGO)
+## nothing gets enriched here
 go_annot <- annot_add %>% filter(tool == 'GO') %>%  
-  select(Orthogroup,
+  dplyr::select(Orthogroup,
          annot,
          contains('pa_'), Agriculture) %>% 
   group_by(Orthogroup) %>%
   mutate(AllAgs = paste(sort(unique(Agriculture)), collapse = ',')) %>%
-  ungroup() %>% select(-Agriculture) %>%
+  ungroup() %>%
+  dplyr::select(-Agriculture) %>%
   distinct() %>%
   gather(agric, val, -Orthogroup, -annot, -AllAgs) %>%
-  select(-agric) %>%
+  dplyr::select(-agric) %>%
   group_by(Orthogroup) %>%
   mutate(go = paste(unique(strsplit(annot, ",")[[1]]), collapse = ",")) %>%
   ungroup() %>%
-  select(-annot) %>%
+  dplyr::select(-annot) %>%
   distinct()
 
-go_annot_u      <- go_annot %>% select(go, Orthogroup) %>% distinct()
+go_annot_u      <- go_annot %>% dplyr::select(go, Orthogroup) %>% distinct()
 ortho2go        <- go_annot_u$go
 names(ortho2go) <- go_annot_u$Orthogroup
 
@@ -759,3 +777,266 @@ go_enrich <- lapply(groups, function(x){
 #          annotation_names_row = FALSE, filename = 'plots/orthologous_gene_matrix.pdf')
 # 
 # 
+```
+
+```{r lostEnrichment}
+
+
+
+library(topGO)
+
+
+xx <- as.list(GOTERM)
+
+metadata <- read_csv('tables/metadata.csv') %>% 
+  filter(!is.na(genome_id))
+
+
+
+
+
+
+## load('rdata/orthologues_long.rdata')
+
+# all_ortho <- orthog_long %>% 
+#   dplyr::rename('gene' = genes) %>%
+#   filter(genome != "GCA_000225605.1_CmilitarisCM01_v01_protein", !is.na(gene)) %>%
+#   mutate(genome = sub('\\..*$', '', genome))
+# rm(orthog_long)
+
+uniq_genomes = unique(ortho_full$genome_id) %>% na.omit()
+id_map         <- sapply(unique(annot$acc), grep, x = uniq_genomes, value = TRUE)
+
+id_map1        <- names(id_map)
+names(id_map1) <- id_map
+
+
+## make sure all of the genomes are in the annotation (will fail if not)
+lapply(uniq_genomes, function(x){
+  print(x)
+  id_map1[[x]]
+})
+
+
+
+all_ortho <- ortho_full %>%
+  rowwise() %>%
+  mutate(genome = id_map1[[genome_id]]) %>%
+  group_by(genome) %>%
+  mutate(acc = grep(genome, metadata$acc, value = TRUE)) %>%
+  ungroup()#%>%
+  # left_join(., metadata, by = 'acc')
+
+
+joined_ortho <- all_ortho %>%
+  left_join(annot, by = c('acc', 'gene'))
+
+
+#dplyr::filter(joined_ortho, tool %in% c('LED', 'MEROPS', 'cazy'), ffa_count == 0) %>% 
+#  .$ortho %>% unique() 
+  
+
+annot_sum <- joined_ortho %>%
+  filter(tool == 'GO') 
+
+annot_sum$Orthogroup %>% n_distinct()
+
+all_out_t <- unique(c(listInput$`Hypomyces_Cladobotryum`, listInput$Trichoderma))
+
+no_out <- listInput$Escovopsis[which(!listInput$Escovopsis %in% all_out_t)]
+
+
+length(no_out) ## only escovopsis 404
+
+
+not_ffa <- all_out_t[which(!all_out_t %in% listInput$Escovopsis)]
+
+length(not_ffa) ## lost in escovopsis 1507
+
+protein_l_f <- list.files('annotation/proteins', pattern = 'fai', full.names = TRUE)
+
+
+
+p_lengths <- lapply(protein_l_f, function(x){
+  genome = basename(x) %>%
+    sub(".fai", "", .) %>%
+    sub(".faa", "", .) %>%
+    sub(".fasta", "", .)
+  read_tsv(x, col_names = c('gene', 'length', 'X', 'X2')) %>%
+    dplyr::select(-contains('X')) %>%
+    mutate(genome = genome)
+}) %>% bind_rows() %>%
+  left_join(., ortho_full, by = c('genome', 'gene'))
+
+## 309 genes lost in 95% esco are in at least one genomes
+p_lengths %>% filter(Orthogroup %in% not_ffa) %>% 
+  dplyr::select(Orthogroup, length, acc, clade_groups) %>%
+  mutate(cds_length = length*3) %>%
+  group_by(Orthogroup, clade_groups) %>%
+  summarize(cds_len = mean(cds_length), length(unique(acc))) %>%
+  group_by(clade_groups) %>%
+  summarize(cds_sum = sum(cds_len), num_genes = length(unique(Orthogroup))) %>%
+  ggplot(aes(y = cds_sum, x = clade_groups, fill = clade_groups)) + 
+  geom_col() +
+  theme_classic() + 
+  scale_fill_manual(values = clade_colors) +
+  labs(y = 'Mean CDS Length', 
+       x = '') +
+  geom_text(aes(y = cds_sum +80, label = num_genes)) +
+  scale_y_continuous(expand = c(0,0), limits =  c(0, 2300000)) +
+  theme(axis.text.x = element_blank(), 
+        axis.ticks = element_blank(),
+        legend.justification=c(1,1),
+        ) +
+  ggsave('plots/esco_reduced_genes_length_barchart.pdf', width = 4.5, height = 4)
+  
+  
+
+
+
+
+
+ortho2go_df <- annot_sum %>% 
+  dplyr::select(Orthogroup, annot) %>%
+  group_by(Orthogroup) %>%
+  mutate(all_go = paste(unique(annot), collapse = ",")) %>%
+  dplyr::select(-annot) %>%
+  distinct() #%>%
+  #mutate(all_go = paste(unique(strsplit(all_go, ",")[[1]]), collapse = ","))
+
+
+ortho2go        <- ortho2go_df$all_go
+names(ortho2go) <- ortho2go_df$Orthogroup
+
+ortho2go <- lapply(ortho2go, function(x){strsplit(x, ',')[[1]]})
+
+geneNames <- names(ortho2go)
+head(geneNames)
+
+
+
+## define the genes that I'm interested in (those not in fungus farming ant escovopsis)
+myInterestingGenes <- not_ffa
+geneList           <- factor(as.integer(geneNames %in% myInterestingGenes))
+names(geneList)    <- geneNames
+
+
+## perform an enrichment test on the genes that are not in FFA
+enrich <- lapply(c('BP', 'MF', 'CC'), function(x){
+  GOdata <- new("topGOdata", ontology = x, allGenes = geneList,
+                annot = annFUN.gene2GO, gene2GO = ortho2go)
+  test.stat <- new("classicCount", 
+                   testStatistic = GOFisherTest, 
+                   name = "Fisher test")
+  resultFisher         <- getSigGroups(GOdata, test.stat)
+  pVal                 <- data.frame(pval=signif(score(resultFisher), 6),BH.correction=seq(1, length(score(resultFisher))))
+  pVal                 <- pVal[order(pVal$pval),]
+  pVal$BH.correction   <- signif(p.adjust(pVal$pval, method="BH"), 6)
+  pVal.sub             <- pVal[pVal$BH.correction<0.01,]
+  pVal.sub$go_id       <- rownames(pVal.sub)
+  pVal.try <- cbind(pVal.sub, Term=sapply(pVal.sub$go_id, FUN=function(n){Term(xx[[n]])}), Ontol=sapply(pVal.sub$go_id, FUN=function(n){Ontology(xx[[n]])}))
+  
+  if (nrow(pVal.try) >0){
+    df2                  <- pVal.try[,c("go_id", "Term", "Ontol", "pval", "BH.correction")]
+    out <- list(df2, GO, resultFisher)
+    invisible(out)
+  } else {
+    message("No enrichment")
+  }
+})
+
+
+
+all_enrich_df <- bind_rows(enrich[[1]][1], enrich[[2]][1], enrich[[3]][1])
+all_enrich_df %>% dplyr::select(go_id, BH.correction, everything()) %>% write_tsv('tables/ffa_reduction_GO.tsv')
+
+
+#printGraph(GOdata, resultFisher, firstSigNodes = nrow(df2), fn.prefix = "tGO", useInfo = "all", pdfSW = TRUE)
+#View(df2)
+
+## get lists of ancestors and offspring
+an  <- c(as.list(GOBPPARENTS), as.list(GOMFPARENTS), as.list(GOCCPARENTS))
+off <- c(as.list(GOBPCHILDREN), as.list(GOMFCHILDREN), as.list(GOCCCHILDREN))
+# Remove GO IDs that do not have any ancestor
+an <- an[!is.na(an)]
+
+my_an <- unlist(an[all_enrich_df$go_id])
+
+enriched_leaves <- all_enrich_df %>%
+  filter(!go_id %in% my_an)
+
+
+reduced_in <- ortho2go_df %>% filter(Orthogroup %in% myInterestingGenes) %>%
+  mutate(all_go = strsplit(all_go, ',')) %>%
+  unnest(all_go) %>%
+  dplyr::rename('go_id' = all_go) %>%
+  right_join(., enriched_leaves, by = 'go_id') %>%
+  left_join(., all_ortho, by = 'Orthogroup') %>%
+  group_by(go_id, clade_groups) %>%
+  mutate(num_ortho = case_when(
+    clade_groups == 'Trichoderma' ~ (length(Orthogroup)/nrow(filter(metadata, genus == 'Trichoderma'))),
+    clade_groups == 'Hypomyces_Cladobotryum' ~ (length(Orthogroup)/nrow(filter(metadata, clade_groups == 'Hypomyces_Cladobotryum')))
+  )) %>%
+  mutate(ortho_pass = ifelse(num_ortho >= 10, TRUE, FALSE)) %>%
+  distinct() %>%
+  filter(any(ortho_pass)) %>% 
+  dplyr::select(go_id, clade_groups, Term, Ontol, BH.correction, num_ortho) %>% 
+  distinct() %>%
+  ungroup() %>%
+  filter(Ontol != 'CC') %>%
+  mutate(Ontol = case_when(
+    Ontol == 'MF' ~ 'Molecular Function',
+    Ontol == 'BP' ~ 'Biological Process'
+  )) %>%
+  mutate(Term_s = case_when(
+    Term == "oxidoreductase activity, acting on paired donors, with incorporation or reduction of molecular oxygen" ~ "oxidoreductase activity",
+    Term == "DNA-binding transcription factor activity, RNA polymerase II-specific" ~ "DNA-binding transcription factor activity",
+    TRUE ~ Term
+  )) %>%
+  mutate(pval_s = case_when(
+    BH.correction <= 0.0001  ~ "****",
+    BH.correction <= 0.001 ~ "***",
+    BH.correction <= 0.01 ~ "**",
+    BH.correction <= 0.5 ~ "*",
+    TRUE ~ "NA"
+  ))
+
+pvals <- reduced_in %>% filter(clade_groups == 'Trichoderma') %>%
+  dplyr::select(-clade_groups) %>% distinct()
+
+reduced_in$Term_s = factor(reduced_in$Term_s,
+                         levels = unique(arrange(reduced_in, num_ortho)$Term_s))
+
+write_csv(reduced_in, path = 'tables/reduced_go_terms.csv')
+
+fig <- reduced_in %>%
+  ggplot(aes(x = Term_s, y = num_ortho)) +
+  geom_col(position = 'dodge', aes(fill = clade_groups)) +
+  theme_classic() +
+  xlab('GO Term') +
+  coord_flip() +
+  ylab('Average Number of OrthoGroups') +
+  ggtitle('GO term Enrichment of Orthogroups Lost in Escovopsis') +
+  geom_text(data = pvals, aes(y = num_ortho + 20, x = Term_s, label = pval_s, angle = 90), size = 2.5) +
+  facet_wrap(~Ontol, nrow = 2, ncol = 1, scales = 'free_y', strip.position = 'left') +
+  scale_y_continuous(expand = c(0,0), limits = c(0, max(reduced_in$num_ortho)+40),
+                     breaks = seq(0, max(reduced_in$num_ortho)+40, by = 50),
+                     labels = seq(0, max(reduced_in$num_ortho)+40, by = 50)
+                     ) +
+  theme(#axis.title.y = element_text(margin=margin(0,-10,0,0)),
+        #axis.text.y = element_text(margin = margin(0,-20,0,0)),
+    text = element_text(size=20),
+    panel.border = element_rect(colour = '#000000', fill = NA, size = 1),
+    legend.title = element_blank(),
+    legend.position = "none")   +
+  scale_fill_manual(values = clade_colors)
+fig
+
+fig + ggsave('plots/reduction_GO_enrich.pdf', width = 15)
+
+
+
+
+
+
+```

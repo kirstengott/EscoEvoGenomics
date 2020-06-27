@@ -275,10 +275,10 @@ orthog_meta_ls %>% group_by(clade_groups, tool) %>%
 orthog_meta_ls$tool <- factor(orthog_meta_ls$tool, levels = c("Single Copy Genes",
                                                               "Resistance Genes",
                                                               "Virulence Genes",
+                                                              "BGC",
                                                               "Lipase Genes",
                                                               "Peptidase Genes",
-                                                              "CAZyme Genes",
-                                                              "BGC"))
+                                                              "CAZyme Genes"))
 
 ####################################################################################
 ## COPY NUMBER is the main reduction 
@@ -382,79 +382,185 @@ orthog_meta_ls %>%
 
 
 
+# df <- orthog_meta_ls %>%
+#   select(Orthogroup, n_genes_genome, clade_groups, acc) %>%
+#   distinct() %>%
+#   group_by(clade_groups, Orthogroup) %>%
+#   summarize(mean = median(n_genes_genome)) %>%
+#   filter(clade_groups %in% c('Escovopsis', 'Trichoderma')) %>%
+#   spread(clade_groups, mean) %>%
+#   replace_na(list(Escovopsis = 0, Trichoderma = 0)) %>%
+#   group_by(Escovopsis, Trichoderma) %>%
+#   mutate(NumberGenes = length(Orthogroup)) %>%
+#   ungroup() %>%
+#   select(-Orthogroup) %>%
+#   unique()
+# 
+# 
+# line_data <- data.frame(y = seq(0, max(df$Escovopsis)), x = seq(0, max(df$Escovopsis)))
+# 
+# t_plot <- df %>%  ggplot(aes(x = Trichoderma, y = Escovopsis)) +
+#   geom_line(data = line_data, aes(x = x, y=y)) +
+#   geom_area(data = line_data, aes(x = x, y=y),
+#             alpha = 0.5, position = 'identity') + 
+#     geom_point(aes(size = NumberGenes)) +
+#   theme_classic() +
+#   labs(y = 'Median number of gene copies in Escovopsis',
+#        x = 'Median number of gene copies in Trichoderma') +
+#   scale_size(breaks = c(100, 1000, 3000), labels = c(100, 1000, 3000)) +
+#   scale_x_continuous(breaks = seq(0, max(df$Trichoderma)), labels = seq(0, max(df$Trichoderma))) +
+#   scale_y_continuous(breaks = seq(0, max(df$Escovopsis)), labels = seq(0, max(df$Escovopsis))) +
+#   theme(
+#     legend.position = c(0.05, .8), 
+#     legend.justification = c(0, 0)
+#   )
+# t_plot
+# 
+# # with marginal histogram
+# 
+# 
+# df <- orthog_meta_ls %>%
+#   select(Orthogroup, n_genes_genome, clade_groups, acc) %>%
+#   distinct() %>%
+#   group_by(clade_groups, Orthogroup) %>%
+#   summarize(mean = median(n_genes_genome)) %>%
+#   filter(clade_groups %in% c('Escovopsis', 'Hypomyces_Cladobotryum')) %>%
+#   spread(clade_groups, mean) %>%
+#   replace_na(list(Escovopsis = 0, Hypomyces_Cladobotryum = 0)) %>%
+#   group_by(Escovopsis, Hypomyces_Cladobotryum) %>%
+#   mutate(NumberGenes = length(Orthogroup)) %>%
+#   ungroup() %>%
+#   select(-Orthogroup) %>%
+#   unique()
+# 
+# line_data <- data.frame(y = seq(0, max(df$Escovopsis)), x = seq(0, max(df$Escovopsis)))
+# 
+# h_plot <- df %>%  ggplot(aes(x = Hypomyces_Cladobotryum, y = Escovopsis)) +
+#   geom_line(data = line_data, aes(x = x, y=y)) +
+#   geom_area(data = line_data, aes(x = x, y=y),
+#             alpha = 0.5, position = 'identity') + 
+#   geom_point(aes(size = NumberGenes)) +
+#   theme_classic() +
+#   ggtitle('') +
+#   labs(y = 'Median number of gene copies in Escovopsis',
+#        x = 'Median number of gene copies in Hypomyces_Cladobotryum') +
+#   scale_size(breaks = c(100, 1000, 2000), labels = c(100, 1000, 2000)) +
+#   scale_x_continuous(breaks = seq(0, max(df$Hypomyces_Cladobotryum)), labels = seq(0, max(df$Hypomyces_Cladobotryum))) +
+#   scale_y_continuous(breaks = seq(0, max(df$Escovopsis)), labels = seq(0, max(df$Escovopsis))) +
+#   theme(
+#     legend.position = c(0.05, .8), 
+#     legend.justification = c(0, 0)
+#   )
+# #h_plot
+# 
+# plot_grid(plotlist = list(t_plot, h_plot), labels = 'AUTO') %>%
+#   ggsave2(filename = 'plots/copy_numer_scatter.pdf')
+
+
+
+########################
+##COMBINING OUTGROUPS##
+#######################
+
+# df <- orthog_meta_ls %>%
+#   select(Orthogroup, n_genes_genome, clade_groups, acc, tool) %>%
+#   distinct() %>%
+#   mutate(clade_groups = ifelse(clade_groups %in% c('Trichoderma', 'Hypomyces_Cladobotryum'), 
+#                                  yes = 'Outgroup',
+#                                  no = clade_groups)) %>%
+#   group_by(clade_groups, Orthogroup) %>%
+#   summarize(mean = median(n_genes_genome)) %>%
+#   spread(clade_groups, mean) %>%
+#   replace_na(list(Escovopsis = 0, Outgroup = 0)) %>%
+#   group_by(Escovopsis, Outgroup) %>%
+#   mutate(NumberGenes = length(Orthogroup)) %>%
+#   ungroup()
+# 
+# df  %>%
+#   select(-Orthogroup) %>%
+#   unique() %>%  
+#   ggplot(aes(x = Outgroup, y = Escovopsis)) +
+#   geom_line(data = line_data, aes(x = x, y=y), linetype = "dashed", colour = 'grey') +
+# #  geom_area(data = line_data, aes(x = x, y=y),
+# #            alpha = 0.5, position = 'identity') + 
+#   geom_tile(aes(x = Outgroup, y = Escovopsis, fill = NumberGenes)) +
+#   theme_classic() +
+#   ggtitle('') +
+#   labs(y = 'Median number of gene copies in Escovopsis',
+#        x = 'Median number of gene copies in Outgroup') +
+#   scale_size(breaks = c(100, 1000, 2000), labels = c(100, 1000, 2000)) +
+#   scale_x_continuous(breaks = seq(0, max(df$Outgroup)), 
+#                      labels = seq(0, max(df$Outgroup)), 
+#                      expand = c(0, 0)) +
+#   scale_y_continuous(breaks = seq(0, max(df$Escovopsis)), 
+#                      labels = seq(0, max(df$Escovopsis)), 
+#                      expand = c(0, 0)) 
+
+
+
 df <- orthog_meta_ls %>%
-  select(Orthogroup, n_genes_genome, clade_groups, acc) %>%
+  select(Orthogroup, n_genes_genome, clade_groups, acc, tool) %>%
   distinct() %>%
-  group_by(clade_groups, Orthogroup) %>%
+  mutate(clade_groups = ifelse(clade_groups %in% c('Trichoderma', 'Hypomyces_Cladobotryum'), 
+                               yes = 'Outgroup',
+                               no = clade_groups)) %>%
+  group_by(clade_groups, tool, Orthogroup) %>%
   summarize(mean = median(n_genes_genome)) %>%
-  filter(clade_groups %in% c('Escovopsis', 'Trichoderma')) %>%
   spread(clade_groups, mean) %>%
-  replace_na(list(Escovopsis = 0, Trichoderma = 0)) %>%
-  group_by(Escovopsis, Trichoderma) %>%
+  replace_na(list(Escovopsis = 0, Outgroup = 0)) %>%
+  group_by(tool, Escovopsis, Outgroup) %>%
   mutate(NumberGenes = length(Orthogroup)) %>%
-  ungroup() %>%
+  ungroup() %>% 
   select(-Orthogroup) %>%
-  unique()
+  distinct()
 
+colors_heat <- colorRampPalette(c("#132B43", "#56B1F7"))
 
-line_data <- data.frame(y = seq(0, max(df$Escovopsis)), x = seq(0, max(df$Escovopsis)))
-
-t_plot <- df %>%  ggplot(aes(x = Trichoderma, y = Escovopsis)) +
-  geom_line(data = line_data, aes(x = x, y=y)) +
-  geom_area(data = line_data, aes(x = x, y=y),
-            alpha = 0.5, position = 'identity') + 
-    geom_point(aes(size = NumberGenes)) +
+fig2a <- df %>%
+  filter(tool != 'Single Copy Genes') %>%
+  ggplot() +
+  geom_point(aes(x = Outgroup, y = Escovopsis, size = NumberGenes)) +
+  #geom_tile(aes(x = Outgroup, y = Escovopsis, fill = NumberGenes)) +
+  geom_line(data = line_data, aes(x = x, y=y), linetype = "dashed", colour = 'grey') +
+  facet_wrap(~tool, scales = 'free_x') +
   theme_classic() +
-  labs(y = 'Median number of gene copies in Escovopsis',
-       x = 'Median number of gene copies in Trichoderma') +
-  scale_size(breaks = c(100, 1000, 3000), labels = c(100, 1000, 3000)) +
-  scale_x_continuous(breaks = seq(0, max(df$Trichoderma)), labels = seq(0, max(df$Trichoderma))) +
-  scale_y_continuous(breaks = seq(0, max(df$Escovopsis)), labels = seq(0, max(df$Escovopsis))) +
-  theme(
-    legend.position = c(0.05, .8), 
-    legend.justification = c(0, 0)
-  )
+  labs(y = 'Median Copy Number in Escovopsis',
+       x = 'Median Copy Number in Outgroups') +
+  scale_x_continuous(breaks = seq(0, max(df$Outgroup), by = 2), 
+                     labels = seq(0, max(df$Outgroup), by = 2)) +
+  scale_y_continuous(breaks = seq(0, max(df$Escovopsis)), 
+                     labels = seq(0, max(df$Escovopsis))) +
+  # scale_color_gradientn(breaks = c(1, seq(100, 1600, by = 200)),
+  #                      labels = c(1, seq(100, 1600, by = 200)),
+  #                      colours = colors_heat(10),
+  #                      values = c(0, 0.01, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6,0.7, 0.8, 0.9, 1), 
+  #                      guide="colourbar") +
+  # guides(fill = guide_colourbar(direction = "horizontal", nbin = 50, title.vjust = 0.7, barwidth = 15)) +
+  theme(legend.position = 'bottom')
 
+fig2a
 
-# with marginal histogram
-
-
-df <- orthog_meta_ls %>%
-  select(Orthogroup, n_genes_genome, clade_groups, acc) %>%
-  distinct() %>%
-  group_by(clade_groups, Orthogroup) %>%
-  summarize(mean = median(n_genes_genome)) %>%
-  filter(clade_groups %in% c('Escovopsis', 'Hypomyces_Cladobotryum')) %>%
-  spread(clade_groups, mean) %>%
-  replace_na(list(Escovopsis = 0, Hypomyces_Cladobotryum = 0)) %>%
-  group_by(Escovopsis, Hypomyces_Cladobotryum) %>%
-  mutate(NumberGenes = length(Orthogroup)) %>%
-  ungroup() %>%
-  select(-Orthogroup) %>%
-  unique()
-
-line_data <- data.frame(y = seq(0, max(df$Escovopsis)), x = seq(0, max(df$Escovopsis)))
-
-h_plot <- df %>%  ggplot(aes(x = Hypomyces_Cladobotryum, y = Escovopsis)) +
-  geom_line(data = line_data, aes(x = x, y=y)) +
-  geom_area(data = line_data, aes(x = x, y=y),
-            alpha = 0.5, position = 'identity') + 
-  geom_point(aes(size = NumberGenes)) +
+df %>%
+  filter(tool == 'Single Copy Genes') %>%
+  ggplot() +
+  geom_tile(aes(x = Outgroup, y = Escovopsis, fill = NumberGenes)) +
+  geom_line(data = line_data, aes(x = x, y=y), linetype = "dashed", colour = 'grey') +
   theme_classic() +
-  ggtitle('') +
-  labs(y = 'Median number of gene copies in Escovopsis',
-       x = 'Median number of gene copies in Hypomyces_Cladobotryum') +
-  scale_size(breaks = c(100, 1000, 2000), labels = c(100, 1000, 2000)) +
-  scale_x_continuous(breaks = seq(0, max(df$Hypomyces_Cladobotryum)), labels = seq(0, max(df$Hypomyces_Cladobotryum))) +
-  scale_y_continuous(breaks = seq(0, max(df$Escovopsis)), labels = seq(0, max(df$Escovopsis))) +
-  theme(
-    legend.position = c(0.05, .8), 
-    legend.justification = c(0, 0)
-  )
-#h_plot
+  scale_x_continuous(breaks = seq(0, max(df$Outgroup)), 
+                     labels = seq(0, max(df$Outgroup)), 
+                     expand = c(0, 0)) +
+  scale_y_continuous(breaks = seq(0, max(df$Escovopsis)), 
+                     labels = seq(0, max(df$Escovopsis)), 
+                     expand = c(0, 0)) +
+  scale_fill_gradientn(breaks = c(1, seq(100, 1600, by = 200)),
+                       labels = c(1, seq(100, 1600, by = 200)),
+                       colours = colors_heat(10),
+                       values = c(0, 0.01, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6,0.7, 0.8, 0.9, 1), 
+                       guide="colourbar") +
+  guides(fill = guide_colourbar(barheight = 20, direction = "vertical",
+                                title.position="top", title.hjust = 0.5,title.vjust = 0.5, nbin = 50))
 
-plot_grid(plotlist = list(t_plot, h_plot), labels = 'AUTO') %>%
-  ggsave2(filename = 'plots/copy_numer_scatter.pdf')
+
 
 
 
@@ -556,12 +662,12 @@ div_out %>%
 
 lapply(unique(div_out$tool), function(x){
   sub <- div_out %>% filter(tool == x)
-shan_p <- sub %>% ggplot(., aes(x = S, y = H, color = Agriculture)) +
-    geom_jitter(size = 2) +
-    scale_color_manual(values = colors[na.omit(unique(metadata$Agriculture))]) +
-    theme_classic() +
-  theme(legend.position = 'none') +
-    labs(y = 'Entropy', x = 'Number of Genes') 
+# shan_p <- sub %>% ggplot(., aes(x = S, y = H, color = Agriculture)) +
+#     geom_jitter(size = 2) +
+#     scale_color_manual(values = colors[na.omit(unique(metadata$Agriculture))]) +
+#     theme_classic() +
+#   theme(legend.position = 'none') +
+#     labs(y = 'Entropy', x = 'Number of Genes') 
   
   shan <-  sub %>%
     ggplot(., aes(x = Agriculture, y = H, color = Agriculture)) +
@@ -588,16 +694,36 @@ shan_p <- sub %>% ggplot(., aes(x = S, y = H, color = Agriculture)) +
     theme(legend.position = 'none') +
     labs(y = 'Gene Evenness', x = '') +
     theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
-  all <- cowplot::plot_grid(plotlist = list(shan_p, shan, rich, even), labels = 'AUTO')
+  all <- cowplot::plot_grid(plotlist = list(shan, rich, even), labels = 'AUTO')
   outfile = sub(" ", "-", paste0('plots/', x, '_gene_copy_box_diversity.pdf'))
   save_plot(plot = all, filename = outfile)
   
 })
 
 
+div_out$tool <- factor(div_out$tool, levels = c("Single Copy Genes",
+                                                              "Resistance Genes",
+                                                              "Virulence Genes",
+                                                              "BGC",
+                                                              "Lipase Genes",
+                                                              "Peptidase Genes",
+                                                              "CAZyme Genes"))
+
+fig2b <- div_out %>% 
+  filter(tool != 'Single Copy Genes') %>%
+  ggplot(., aes(x = S, y = H, color = Agriculture)) +
+  geom_jitter(size = 2) +
+  scale_color_manual(values = colors[na.omit(unique(metadata$Agriculture))]) +
+  theme_classic() +
+  theme(legend.position = 'bottom') +
+  labs(y = 'Entropy', x = 'Number of Genes') +
+  facet_wrap(~tool, scales = 'free')
 
 
 
+
+cowplot::plot_grid(plotlist = list(fig2a, fig2b), labels = 'AUTO') %>%
+  ggsave2( filename = 'plots/figure3.pdf')
 
 ### ONLY VIRULENCE CONVERGES< NOT CONSIDERING
 # nmds_all <- lapply(tools, function(y){
