@@ -43,6 +43,25 @@ proteins <- dplyr::filter(metadata, !is.na(n_proteins)) %>%
 proteins
 
 
+
+proteins <- dplyr::filter(metadata, !is.na(n_proteins)) %>%
+  ggplot(aes(x = clade_groups, y = n_proteins, colour = clade_groups)) + 
+  geom_boxplot() + 
+  geom_jitter(alpha = 0.5) +
+  theme_classic() +
+  labs(x = '', 
+       y = 'Number of Genes')  +
+  scale_y_continuous(limits = c(0, max(metadata$n_proteins))) +
+  theme(
+        legend.position = 'none',
+        axis.text.x = element_blank(),
+        axis.ticks.x = element_blank()) +
+  scale_colour_manual(values = clade_colors) + 
+  ggsave('plots/protein_coding_gene_N_boxplot_tiny.pdf', width = 2.5, height = 2)
+proteins
+
+
+
 ```
 
 
@@ -252,7 +271,9 @@ total_cds
 plot_grid(genome_size, as_len, mrna_length, total_cds, mean_mrnas, number_introns, intron_length, legend, labels = 'AUTO', label_size = 14,
           nrow = 4, ncol = 2) + 
   ggsave2(filename = 'plots/supplementary_fig1.pdf', height = 10, width = 10)
-
+plot_grid(genome_size, as_len, mrna_length, total_cds, mean_mrnas, number_introns, intron_length, legend, labels = 'AUTO', label_size = 14,
+          nrow = 4, ncol = 2) + 
+  ggsave2(filename = 'plots/supplementary_fig1.png', height = 10, width = 10)
 ```
 
 ```{r}
@@ -290,5 +311,43 @@ lapply(unique(summ$stat), function(x){
 
 
 
+```{r core-accessory}
+load('rdata/orthologues_long.rdata')
 
+ortho_full  <- orthog_long %>% 
+  filter(!is.na(genes)) %>%
+  group_by(genome) %>%
+  mutate(acc = case_when(
+      grepl('GCA_004303015', genome) ~ 'GCA_004303015.1',
+      grepl('GCA_011799845', genome) ~ 'GCA_011799845.1',
+      grepl('GCA', genome) ~ paste(strsplit(genome, split = "_")[[1]][c(1,2)], collapse = "_"),
+      grepl("SPDT00000000.1_genomic", genome) ~ "SPDT00000000",
+      grepl('all.maker', genome) ~ sub(".all.maker.proteins", '', genome),
+      grepl('LGSR', genome) ~ "LGSR00000000",
+      TRUE ~ genome
+    )) %>%
+  ungroup() %>%
+  dplyr::rename('gene' = genes) %>%
+  left_join(., metadata, by = 'acc')
 
+core <- orthog_long %>%
+  group_by(Orthogroup) %>%
+  filter(!is.na(genes), genome != 'GCA_000225605.1_CmilitarisCM01_v01_protein') %>%
+  mutate(n_genomes = length(unique(genome))) %>%
+  filter(n_genomes == 45)
+
+## 1) genome-specific genes are those thatdo not cluster with any gene in any other genome in the phylogeny 
+acces1 <- orthog_long %>%
+  group_by(Orthogroup) %>%
+  filter(!is.na(genes), genome != 'GCA_000225605.1_CmilitarisCM01_v01_protein') %>%
+  mutate(n_genomes = length(unique(genome))) %>%
+  filter(n_genomes == 1)
+
+# 2) lineage-specific genes are those that have homologs in only the evolutionarilyclosest group of genomes 
+acces2 <- ortho_full %>%
+  filter(!is.na(gene), genome != 'GCA_000225605.1_CmilitarisCM01_v01_protein') %>%
+  group_by(Orthogroup) %>%
+  mutate(n_ags = length(unique(Agriculture))) %>%
+  filter(n_ags == 1)
+  
+```

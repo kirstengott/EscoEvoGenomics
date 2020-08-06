@@ -44,6 +44,7 @@ pdf(file = 'plots/ace_genome_size.pdf', width = 20, height = 10)
 plotTree(sub_tree,mar=c(0.1,0.1,5.1,0.1),offset=0.5)
 nodelabels(node_text, cex=0.7, bg = 'white')
 dev.off()
+system('convert -density 300 plots/ace_genome_size.pdf -resize 25% plots/ace_genome_size.png')
 
 ### DO THE SAME WITH NUMBERS OF PROTEINS
 
@@ -78,5 +79,6 @@ pdf(file = 'plots/ace_protein_number.pdf', width = 20, height = 10)
 plotTree(sub_tree,mar=c(0.1,0.1,5.1,0.1),offset=0.5)
 nodelabels(node_text, cex=0.7, bg = 'white')
 dev.off()
+system('convert -density 300 plots/ace_protein_number.pdf -resize 25% plots/ace_protein_number.png')
 
 
