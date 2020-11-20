@@ -116,12 +116,120 @@ data %>%
   geom_tile(aes(y = g1, x = g2, fill = dn_ds)) +
   theme_classic() +
   theme(axis.text.x = element_text(angle = 90)) +
+  scale_fill_continuous(type = 'viridis')
   ggsave(filename = 'plots/dn_ds_plot.pdf', height = 6,
          width = 7)
 
 
+data <- read_csv('tables/mafft-dn_ds_summary.txt', col_names = c('g1', 'g2', 'dn_ds')) %>%
+  mutate(g1 = sub("\\..*$", "", g1)) %>%
+  mutate(g2 = sub("\\..*$", "", g2))
+ 
+
+datalist = list()
+for (t in order) {
+  print(t)
+  ani_vals <- c(data[grep(t, data$g1), ]$dn_ds,
+                data[grep(t, data$g2), ]$dn_ds)
+  genome_vals <- c(data[grep(t, data$g1), ]$g2, 
+                   data[grep(t, data$g2), ]$g1)
+  data <- data %>% filter(g1 != t, g2 != t)
+  datalist[[t]] <- data.frame(g1 = t, 
+                              g2 = genome_vals, 
+                              dn_ds = ani_vals)
+}
+
+
+data <- bind_rows(datalist)
+
+#data <- left_join(dn_ds, ani, by = c('g1', 'g2'))
+
+data$g1 <- factor(data$g1, levels = order)
+data$g2 <- factor(data$g2, levels = order)
 
 
 
 
+
+data %>% 
+  ggplot() + 
+  geom_tile(aes(y = g1, x = g2, fill = dn_ds)) +
+  theme_classic() +
+  scale_fill_continuous( type = 'viridis') +
+  theme(axis.text.x = element_text(angle = 90))
+
+##################################
+### PLAYING WITH DENSITY PLOTS ###
+##################################
+
+
+
+metadata <- read_csv('tables/metadata.csv') %>%
+  select(acc, genus, Agriculture) %>%
+   filter(!is.na(genus)) #%>%
+  # mutate(acc = sub("\\..*$", "", acc)) %>%
+  # mutate(Query = acc) %>%
+  # mutate(Reference = acc)
+
+esc <- metadata %>% filter(genus == 'Escovopsis') %>% .$acc
+trich <- metadata %>% filter(genus == 'Trichoderma') %>% .$acc %>%
+  purrr::map(sub, pattern = "\\..*$", replacement = "") %>%
+  unlist()
+
+data %>% 
+  filter(g1 %in% esc, g2 %in% esc) %>%
+  ggplot(aes(x = dn_ds, y = ani)) +
+  geom_density_2d() +
+  geom_point() +
+  theme_classic()
+
+data %>% 
+    filter(g1 %in% trich, g2 %in% trich) %>%
+  ggplot(aes(x = dn_ds, y = ani)) +
+    geom_density_2d() +
+    geom_point() +
+    theme_classic()
+
+
+
+split2vec <- function(x, split){
+  paste(strsplit(x, split = split)[[1]][c(1,2)], collapse = "_")
+}
+
+ani <- read_tsv('tables/ANIvis.tsv') %>%
+  mutate_at(c('Query', 'Reference'), basename) %>%
+  mutate_at(c('Query', 'Reference'), sub, pattern = '.cds_from_genomic.fa', replacement = '')
+
+ani$Query <- ani$Query %>% purrr::map(split2vec, split = '_') %>% 
+  purrr::map(sub, pattern = '_NA', replacement ='') %>% 
+  unlist
+
+ani$Reference <- ani$Reference %>% purrr::map(split2vec, split = '_') %>% 
+  purrr::map(sub, pattern = '_NA', replacement ='') %>% 
+  unlist
+
+
+
+ani_d <- ani %>% 
+  left_join(., select(metadata, -Reference), by = 'Query') %>%
+  left_join(., select(metadata, -Query), by = 'Reference') %>%
+  mutate(genus_join = paste0(genus.x, '-', genus.y)) %>%
+  mutate(group_join = paste0(Agriculture.x, '-', Agriculture.y))
+
+poin_sub <- ani %>%
+  filter(ANI > 95)
+
+ani %>% 
+  filter(Query %in% esc, Reference %in% esc) %>%
+  ggplot(aes(x = QueryAligned, y = ANI)) +
+  geom_point() +
+  stat_density_2d() + 
+  theme_classic()
+
+ani %>% 
+  filter(Query %in% trich, Reference %in% trich) %>%
+  ggplot(aes(x = QueryAligned, y = ANI)) +
+  geom_point() +
+  stat_density_2d() + 
+  theme_classic()
 

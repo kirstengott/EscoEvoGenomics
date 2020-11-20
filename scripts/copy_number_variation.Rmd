@@ -1,0 +1,1267 @@
+
+```{r def-env}
+library(pheatmap)
+library(RColorBrewer)
+library(pvclust)
+library(vegan)
+library(UpSetR)
+source('scripts/color_palettes.R')
+library(cowplot)
+library(ggridges)
+library(tidyverse)
+
+
+make_ordered_dataframe <- function(data, order, col){
+  datalist = list()
+  for (t in order) {
+    ani_vals <- c(data[grep(t, data$g1), col, drop = TRUE],
+                  data[grep(t, data$g2), col, drop = TRUE])
+    genome_vals <- c(data[grep(t, data$g1), ]$g2, 
+                     data[grep(t, data$g2), ]$g1)
+    if(length(ani_vals > 0)){
+      data <- data %>% filter(g1 != t, g2 != t)
+      datalist[[t]] <- data.frame(g1 = t, 
+                                  g2 = genome_vals, 
+                                  dn_ds = ani_vals)
+    } else {
+      datalist[[t]] <- data.frame()
+    }
+  }
+  data <- bind_rows(datalist)
+  data$g1 <- factor(data$g1, levels = order)
+  data$g2 <- factor(data$g2, levels = order)
+  invisible(data)  
+}
+
+# dn_ds_f     <- read_csv('tables/mafft-dn_ds_all.txt', col_names = c('Orthogroup', 'g1', 'g2', 'dn_ds', 'dn', 'ds')) %>%
+#   mutate(g1 = sub("\\..*$", "", g1)) %>%
+#   mutate(g2 = sub("\\..*$", "", g2)) %>%
+#   filter(dn != 99, 
+#          ds != 99)
+
+esc <- c(           "ICBG2046",
+                    "ICBG2048",
+                    "ICBG2047",
+                    "ICBG2049",
+                    "ICBG712",
+                    "ICBG721",
+                    "ICBG1054",
+                    "ICBG726",
+                    "ICBG1065",
+                    "ICBG1075",
+                    "NIGD00000000",
+                    "ICBG710",
+                    "ICBG730",
+                    "ICBG751",
+                    "ICBG733",
+                    "ICBG1096",
+                    "ICBG742",
+                    "NIGB00000000",
+                    "LGSR00000000",
+                    "NQYS00000000",
+                    "ICBG731",
+                    "ICBG736",
+                    "NIGC00000000",
+                    "NQYR00000000",
+                    "NQYQ00000000")
+
+
+
+
+
+order <- c("GCA_000225605",
+           "GCA_003012105",
+           "GCA_003025115",
+           "GCA_000171015",
+           "GCA_001481775",
+           "GCA_002894205",
+           "GCA_003025105",
+           "GCA_003025155",
+           "GCA_001050175",
+           "GCA_000167675",
+           "GCA_000513815",
+           "GCA_000170995",
+           "GCA_002894145",
+           "GCA_000988865",
+           "GCA_011066345",
+           "GCA_002022785",
+           "GCA_003025095",
+           "GCA_002838845",
+           "SPDT00000000",
+           "GCA_004303015",
+           "GCA_011799845",
+           "ICBG2046",
+           "ICBG2048",
+           "ICBG2047",
+           "ICBG2049",
+           "ICBG712",
+           "ICBG721",
+           "ICBG1054",
+           "ICBG726",
+           "ICBG1065",
+           "ICBG1075",
+           "NIGD00000000",
+           "ICBG710",
+           "ICBG730",
+           "ICBG751",
+           "ICBG733",
+           "ICBG1096",
+           "ICBG742",
+           "NIGB00000000",
+           "LGSR00000000",
+           "NQYS00000000",
+           "ICBG731",
+           "ICBG736",
+           "NIGC00000000",
+           "NQYR00000000",
+           "NQYQ00000000")
+```
+
+```{r load-data}
+#dn_ds_f$g1 <- factor(dn_ds_f$g1, levels = order)
+#dn_ds_f$g2 <- factor(dn_ds_f$g2, levels = order)
+
+load('rdata/orthologues_long.rdata')
+
+
+
+genomes <- colnames(orthog) %>% 
+  purrr::map(.x = ., function(x){sub(pattern = ".all.maker.proteins", replacement = "", x)}) %>%
+  purrr::map(.x = ., function(x){sub(pattern = ".protein.", replacement = "", x)}) %>%
+  purrr::map(.x = ., function(x){sub(pattern = ".protein", replacement = "", x)}) %>%
+  purrr::map(.x = ., function(x){split <- strsplit(x, split = "_")[[1]]
+                                                   if (length(split) > 1) {
+                                                     paste(split[c(1,2)], collapse = "_")
+                                                   } else {x} 
+                                          
+               }) %>%
+  unlist()
+genomes <- genomes[-c(1)]
+
+
+# busco_f <-list.files('annotation/ascomybocta_odb10_busco/prot', full.names = TRUE)
+# index <- sapply(genomes, function(x){
+#   grep(x, busco_f)
+# })
+
+# 
+# busco <- lapply(seq(1, length(index)), function(x){
+#    genome = names(index[x])
+#    df = data.frame()
+#    try(
+#    df <- read_tsv(busco_f[index[[x]]], skip = 3, col_names = c('busco', 'status',	'sequence', 'score', 	'length')) %>%
+#      mutate(genome = genome))
+#   return(df)
+# }) %>% bind_rows() %>%
+#    filter(!is.na(sequence))
+
+# card_f <- list.files('annotation/card', full.names = TRUE)
+# 
+# index <- sapply(genomes, function(x){
+#   grep(x, card_f)
+# 
+# #x <- 4
+# card <- lapply(seq(1, length(index)), function(x){
+#   genome = names(index[x])
+#   df <- data.frame()
+#   try(
+#   df <- read_tsv(card_f[index[[x]]]) %>%
+#     mutate(genome = genome))
+#   return(df)
+# }) %>% bind_rows() %>%
+#   mutate(ORF_ID = sub(" .*$", "", ORF_ID))
+
+
+metadata <- read_csv('tables/metadata.csv') %>% mutate(genome = sub("\\..*$", "", acc)) %>%
+  mutate(Agriculture = ifelse(!clade_groups == 'Escovopsis', yes = clade_groups, no = Agriculture)) %>%
+  mutate(Agriculture1 = ifelse(!clade_groups == 'Escovopsis', yes = clade_groups, no = Agriculture1))
+
+
+
+orthog_meta <- orthog_long %>%
+  group_by(Orthogroup) %>%
+  mutate(n_genes = length(unique(genes))) %>%
+  ungroup() %>%
+  group_by(genome, Orthogroup) %>%
+  mutate(n_genes_genome = length(unique(genes))) %>%
+  filter(n_genes_genome <= 10) %>%
+  ungroup() %>%
+  mutate(g1 = sub("\\..*$", "", genome)) %>%
+  mutate(genome = sub("\\..*$", '', genome)) %>%
+  left_join(., metadata, by = 'genome') %>%
+  filter(genome != 'GCA_000225605')
+
+orthog_meta %>% group_by(clade_groups) %>%
+  summarize(mean_copy_number = mean(n_genes_genome))
+```
+
+```{r munge-data-count-copies}
+count_increase = orthog_meta %>%
+  select(Orthogroup, n_genes_genome, clade_groups) %>%
+  group_by(clade_groups, Orthogroup) %>%
+  summarize(med_genes = median(n_genes_genome)) %>%
+  spread(clade_groups, med_genes) %>%
+  group_by(Orthogroup) %>%
+  mutate(ratio = Escovopsis/mean(c(Hypomyces_Cladobotryum, Trichoderma))) 
+
+## more than 1 == copy number increase
+
+count_increase %>% filter(ratio > 1) %>% nrow()
+
+## less than 1 == copy number decrease
+
+count_increase %>% filter(ratio < 1) %>% nrow()
+
+orthog_meta %>% 
+    select(Orthogroup, genome, clade_groups, n_genes_genome) %>%
+    distinct() %>%
+    ggplot(aes(x = clade_groups, y = n_genes_genome)) +
+    geom_violin() +
+    theme_classic() +
+    labs(y = 'Gene Copy Number', 
+         title = 'Copy Number Distribution')
+  
+
+tool_sub <- c('virulence', 'led', 'MEROPS', 'cazy', 'CARD', 'busco', 'antismash')
+tools_name <- c('virulence' = 'Virulence Genes', 
+                'led' = 'Lipase Genes', 
+                'MEROPS' = 'Peptidase Genes', 
+                'cazy' = 'CAZyme Genes', 
+                'CARD' = 'Resistance Genes', 
+                'busco' = 'Single Copy Genes',
+                'antismash' = 'BGC')
+
+
+merops_fams <- read_tsv('annotation/merops_family_map.txt', col_names = c('annotation', 'merops_family')) %>%
+  distinct()
+
+merops_fam_ls        <- merops_fams$merops_family
+names(merops_fam_ls) <- merops_fams$annotation
+
+annot    <- read_tsv('annotation/all_annotations.txt', col_names = c('genome', 'gene', 'tool', 'annotation')) %>%
+  filter(tool %in% tool_sub, annotation != '-') %>%
+  mutate(genome = sub("\\..*$", "", genome)) %>%
+  mutate(annotation = ifelse(tool == 'MEROPS',
+                             yes = sub("-.*$", "", annotation),
+                             no = annotation)) %>%
+  mutate(annotation = ifelse(tool == 'MEROPS',
+                             yes = ifelse(annotation %in% names(merops_fam_ls), yes = merops_fam_ls[annotation], no = annotation), ## integrate family ids, but keep undefined families
+                             no = annotation)) %>%
+  filter(!grepl('mix.component', annotation)) %>%
+  mutate(annotation = ifelse(tool == 'virulence',
+                             yes = sub("_.*$", "", annotation),
+                             no = annotation))
+
+
+
+orthog_long <- orthog_long %>%
+  mutate(genome = sub("\\..*$", "", genome)) %>%
+  filter(genome != "GCA_000225605") %>% ## remove cordycep genome for this analysis 
+  rename('gene' = genes)
+
+
+
+orthog_meta_ls <- lapply(tool_sub, function(x){
+  if(x == 'led'){
+    annot_sub <- annot %>% filter(tool == x) %>%
+      group_by(genome, gene) %>%
+      mutate(annotation = list(strsplit(annotation, split = ',')[[1]])) %>%
+      ungroup() %>%
+      unnest_longer(annotation)
+  } else {
+    annot_sub <- annot %>% filter(tool == x)}
+  ## 90% or higher of the genes in the orthogroup need to be annotated to one of the tools to be included 
+  orthog_meta <- orthog_long %>%
+    inner_join(., annot_sub, by = c('genome', 'gene')) %>%
+    mutate(metadata = ifelse(gene %in% annot_sub$gene, yes = TRUE, no = FALSE)) %>%
+    group_by(Orthogroup) %>%
+    mutate(n_genes = length(unique(gene))) %>%
+    mutate(n_genes_in = length(which(metadata))) %>%
+    ungroup() %>%
+    group_by(genome, Orthogroup) %>%
+    mutate(n_genes_genome = length(unique(gene))) %>%
+    ungroup() %>%
+    mutate(prop_genes_in = (n_genes_in/n_genes)*100) %>%
+    mutate(g1 = sub("\\..*$", "", genome)) %>%
+    filter(prop_genes_in >= 90) %>%
+    mutate(genome = sub("\\..*$", '', genome)) %>%
+    left_join(., metadata, by = 'genome') %>%
+    mutate(tool = tools_name[x])
+  if(x == 'cazy'){
+    orthog_meta <- orthog_meta %>% filter(annotation != 'N')
+  }
+  orthog_meta
+}) %>% bind_rows()
+
+
+
+
+orthog_meta_ls %>% group_by(clade_groups, tool) %>%
+    summarize(mean_copy_number = mean(n_genes_genome)) %>%
+  spread(tool, mean_copy_number)
+
+orthog_meta_ls$tool <- factor(orthog_meta_ls$tool, levels = c("Single Copy Genes",
+                                                              "Resistance Genes",
+                                                              "Virulence Genes",
+                                                              "BGC",
+                                                              "Lipase Genes",
+                                                              "Peptidase Genes",
+                                                              "CAZyme Genes"))
+
+```
+
+
+```{r old-plots, eval = FALSE}
+####################################################################################
+## COPY NUMBER is the main reduction 
+####################################################################################
+#x <- tool_sub[1]
+
+orthog_meta_ls %>% 
+    select(Orthogroup, genome, clade_groups, n_genes_genome, tool) %>%
+    distinct() %>%
+    ggplot(aes(y = clade_groups, x = n_genes_genome, fill = clade_groups, color = clade_groups)) +
+    geom_density_ridges(scale = .9, stat = 'binline', draw_baseline = FALSE, binwidth = 1) +
+     scale_fill_manual(values = clade_colors) +
+     scale_color_manual(values = clade_colors) +
+    scale_y_discrete(expand = expansion(mult = c(0.01, .7))) +
+    theme_classic() +
+    theme(#is.text.y = element_blank(), axis.ticks.y = element_blank(),
+          legend.position = 'none') +
+    labs(x = 'Gene Copy Number',
+         y = '') +
+  facet_wrap(~tool, nrow = 3, ncol = 3) +
+  ggsave('plots/gene_copy_number_clade_hist.pdf')
+
+
+orthog_meta_ls %>% 
+  select(Orthogroup, genome, clade_groups, n_genes_genome, tool) %>%
+  distinct() %>%
+  ggplot(aes(x = clade_groups, y = n_genes_genome, fill = clade_groups, color = clade_groups)) +
+  geom_violin() +
+  scale_fill_manual(values = clade_colors) +
+  scale_color_manual(values = clade_colors) +
+  # scale_y_discrete(expand = expansion(mult = c(0.01, .7))) +
+  theme_classic() +
+  theme(#axis.text.x = element_blank(), axis.ticks.x = element_blank(),
+        legend.position = 'none') +
+  labs(y = 'Gene Copy Number',
+       x = '') +
+  facet_wrap(~tool, nrow = 3, ncol = 3) +
+  ggsave('plots/gene_copy_number_clade_violin.pdf')
+
+
+
+orthog_meta_ls$Agriculture <- factor(orthog_meta_ls$Agriculture, levels = rev(c("Trichoderma",
+                                                                            "Hypomyces_Cladobotryum",
+                                                                            "Lower",
+                                                                            "Coral",
+                                                                            "Higher",
+                                                                            "Leafcutter"
+                                                                            )))
+
+orthog_meta_ls %>% 
+  select(Orthogroup, genome, Agriculture, n_genes_genome, tool) %>%
+  distinct() %>%
+  ggplot(aes(y = Agriculture, x = n_genes_genome, fill = Agriculture, color = Agriculture)) +
+  geom_density_ridges(scale = .9, stat = 'binline', draw_baseline = FALSE, binwidth = 1) +
+  scale_fill_manual(values = colors) +
+  scale_color_manual(values = colors) +
+  scale_y_discrete(expand = expansion(mult = c(0.01, .2))) +
+  scale_x_continuous(breaks = seq(1, 30, by = 5), 
+                     labels = seq(1, 30, by = 5),
+                     expand = c(0, 0)) +
+  theme_classic() +
+  theme(#axis.text.y = element_blank(), axis.ticks.y = element_blank(),
+        legend.position = 'none') +
+  labs(x = 'Gene Copy Number',
+       y = '') +
+  facet_wrap(~tool, nrow = 3, ncol = 3) +
+  ggsave('plots/gene_copy_number_ag_hist.pdf')
+
+
+orthog_meta_ls$Agriculture <- factor(orthog_meta_ls$Agriculture, levels = c("Trichoderma",
+                                                                                "Hypomyces_Cladobotryum",
+                                                                                "Lower",
+                                                                                "Coral",
+                                                                                "Higher",
+                                                                                "Leafcutter"
+))
+
+orthog_meta_ls %>% 
+  select(Orthogroup, genome, Agriculture, n_genes_genome, tool) %>%
+  distinct() %>%
+  ggplot(aes(x = Agriculture, y = n_genes_genome, fill = Agriculture, color = Agriculture)) +
+  geom_violin() +
+  scale_fill_manual(values = colors) +
+  scale_color_manual(values = colors) +
+  # scale_y_discrete(expand = expansion(mult = c(0.01, .7))) +
+  theme_classic() +
+  theme(#axis.text.x = element_blank(), axis.ticks.x = element_blank(),
+        legend.position = 'none') +
+  labs(x = '',
+       y = 'Gene Copy Number') +
+  facet_wrap(~tool, nrow = 3, ncol = 3) + 
+  ggsave('plots/gene_copy_number_ag_violin.pdf')
+
+
+```
+
+```{r fig-3a}
+###########################
+## Making scatter plots ###
+###########################
+
+
+
+# df <- orthog_meta_ls %>%
+#   select(Orthogroup, n_genes_genome, clade_groups, acc) %>%
+#   distinct() %>%
+#   group_by(clade_groups, Orthogroup) %>%
+#   summarize(mean = median(n_genes_genome)) %>%
+#   filter(clade_groups %in% c('Escovopsis', 'Trichoderma')) %>%
+#   spread(clade_groups, mean) %>%
+#   replace_na(list(Escovopsis = 0, Trichoderma = 0)) %>%
+#   group_by(Escovopsis, Trichoderma) %>%
+#   mutate(NumberGenes = length(Orthogroup)) %>%
+#   ungroup() %>%
+#   select(-Orthogroup) %>%
+#   unique()
+# 
+# 
+# line_data <- data.frame(y = seq(0, max(df$Escovopsis)), x = seq(0, max(df$Escovopsis)))
+# 
+# t_plot <- df %>%  ggplot(aes(x = Trichoderma, y = Escovopsis)) +
+#   geom_line(data = line_data, aes(x = x, y=y)) +
+#   geom_area(data = line_data, aes(x = x, y=y),
+#             alpha = 0.5, position = 'identity') + 
+#     geom_point(aes(size = NumberGenes)) +
+#   theme_classic() +
+#   labs(y = 'Median number of gene copies in Escovopsis',
+#        x = 'Median number of gene copies in Trichoderma') +
+#   scale_size(breaks = c(100, 1000, 3000), labels = c(100, 1000, 3000)) +
+#   scale_x_continuous(breaks = seq(0, max(df$Trichoderma)), labels = seq(0, max(df$Trichoderma))) +
+#   scale_y_continuous(breaks = seq(0, max(df$Escovopsis)), labels = seq(0, max(df$Escovopsis))) +
+#   theme(
+#     legend.position = c(0.05, .8), 
+#     legend.justification = c(0, 0)
+#   )
+# t_plot
+# 
+# # with marginal histogram
+# 
+# 
+# df <- orthog_meta_ls %>%
+#   select(Orthogroup, n_genes_genome, clade_groups, acc) %>%
+#   distinct() %>%
+#   group_by(clade_groups, Orthogroup) %>%
+#   summarize(mean = median(n_genes_genome)) %>%
+#   filter(clade_groups %in% c('Escovopsis', 'Hypomyces_Cladobotryum')) %>%
+#   spread(clade_groups, mean) %>%
+#   replace_na(list(Escovopsis = 0, Hypomyces_Cladobotryum = 0)) %>%
+#   group_by(Escovopsis, Hypomyces_Cladobotryum) %>%
+#   mutate(NumberGenes = length(Orthogroup)) %>%
+#   ungroup() %>%
+#   select(-Orthogroup) %>%
+#   unique()
+# 
+# line_data <- data.frame(y = seq(0, max(df$Escovopsis)), x = seq(0, max(df$Escovopsis)))
+# 
+# h_plot <- df %>%  ggplot(aes(x = Hypomyces_Cladobotryum, y = Escovopsis)) +
+#   geom_line(data = line_data, aes(x = x, y=y)) +
+#   geom_area(data = line_data, aes(x = x, y=y),
+#             alpha = 0.5, position = 'identity') + 
+#   geom_point(aes(size = NumberGenes)) +
+#   theme_classic() +
+#   ggtitle('') +
+#   labs(y = 'Median number of gene copies in Escovopsis',
+#        x = 'Median number of gene copies in Hypomyces_Cladobotryum') +
+#   scale_size(breaks = c(100, 1000, 2000), labels = c(100, 1000, 2000)) +
+#   scale_x_continuous(breaks = seq(0, max(df$Hypomyces_Cladobotryum)), labels = seq(0, max(df$Hypomyces_Cladobotryum))) +
+#   scale_y_continuous(breaks = seq(0, max(df$Escovopsis)), labels = seq(0, max(df$Escovopsis))) +
+#   theme(
+#     legend.position = c(0.05, .8), 
+#     legend.justification = c(0, 0)
+#   )
+# #h_plot
+# 
+# plot_grid(plotlist = list(t_plot, h_plot), labels = 'AUTO') %>%
+#   ggsave2(filename = 'plots/copy_numer_scatter.pdf')
+
+
+
+########################
+##COMBINING OUTGROUPS##
+#######################
+
+# df <- orthog_meta_ls %>%
+#   select(Orthogroup, n_genes_genome, clade_groups, acc, tool) %>%
+#   distinct() %>%
+#   mutate(clade_groups = ifelse(clade_groups %in% c('Trichoderma', 'Hypomyces_Cladobotryum'), 
+#                                  yes = 'Outgroup',
+#                                  no = clade_groups)) %>%
+#   group_by(clade_groups, Orthogroup) %>%
+#   summarize(mean = median(n_genes_genome)) %>%
+#   spread(clade_groups, mean) %>%
+#   replace_na(list(Escovopsis = 0, Outgroup = 0)) %>%
+#   group_by(Escovopsis, Outgroup) %>%
+#   mutate(NumberGenes = length(Orthogroup)) %>%
+#   ungroup()
+# 
+# df  %>%
+#   select(-Orthogroup) %>%
+#   unique() %>%  
+#   ggplot(aes(x = Outgroup, y = Escovopsis)) +
+#   geom_line(data = line_data, aes(x = x, y=y), linetype = "dashed", colour = 'grey') +
+# #  geom_area(data = line_data, aes(x = x, y=y),
+# #            alpha = 0.5, position = 'identity') + 
+#   geom_tile(aes(x = Outgroup, y = Escovopsis, fill = NumberGenes)) +
+#   theme_classic() +
+#   ggtitle('') +
+#   labs(y = 'Median number of gene copies in Escovopsis',
+#        x = 'Median number of gene copies in Outgroup') +
+#   scale_size(breaks = c(100, 1000, 2000), labels = c(100, 1000, 2000)) +
+#   scale_x_continuous(breaks = seq(0, max(df$Outgroup)), 
+#                      labels = seq(0, max(df$Outgroup)), 
+#                      expand = c(0, 0)) +
+#   scale_y_continuous(breaks = seq(0, max(df$Escovopsis)), 
+#                      labels = seq(0, max(df$Escovopsis)), 
+#                      expand = c(0, 0)) 
+
+
+
+df <- orthog_meta_ls %>%
+  select(Orthogroup, n_genes_genome, clade_groups, acc, tool) %>%
+  distinct() %>%
+  mutate(clade_groups = ifelse(clade_groups %in% c('Trichoderma', 'Hypomyces_Cladobotryum'), 
+                               yes = 'Outgroup',
+                               no = clade_groups)) %>%
+  group_by(clade_groups, tool, Orthogroup) %>%
+  summarize(mean = median(n_genes_genome)) %>%
+  spread(clade_groups, mean) %>%
+  replace_na(list(Escovopsis = 0, Outgroup = 0)) %>%
+  group_by(tool, Escovopsis, Outgroup) %>%
+  mutate(NumberGenes = length(Orthogroup)) %>%
+  ungroup() %>% 
+  select(-Orthogroup) %>%
+  distinct()
+
+colors_heat <- colorRampPalette(c("#132B43", "#56B1F7"))
+
+
+df$tool <- factor(df$tool, levels = c('CAZyme Genes', 'Lipase Genes', 'Peptidase Genes', 'BGC', 'Resistance Genes', 'Virulence Genes', 'Single Copy Genes'))
+
+fig2a <- df %>%
+  filter(tool != 'Single Copy Genes') %>%
+  ggplot() +
+  geom_point(aes(x = Outgroup, y = Escovopsis, size = NumberGenes)) +
+  #geom_tile(aes(x = Outgroup, y = Escovopsis, fill = NumberGenes)) +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", colour = 'grey') +
+  facet_wrap(~tool, scales = 'free') +
+  theme_classic() +
+  labs(y = 'Median Copy Number in Escovopsis',
+       x = 'Median Copy Number in Outgroups') +
+  scale_x_continuous(breaks = seq(0, max(df$Outgroup), by = 2),
+                     labels = seq(0, max(df$Outgroup), by = 2)) +
+  scale_y_continuous(breaks = seq(0, max(df$Escovopsis)),
+                     labels = seq(0, max(df$Escovopsis))) +
+  # scale_color_gradientn(breaks = c(1, seq(100, 1600, by = 200)),
+  #                      labels = c(1, seq(100, 1600, by = 200)),
+  #                      colours = colors_heat(10),
+  #                      values = c(0, 0.01, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6,0.7, 0.8, 0.9, 1),
+  #                      guide="colourbar") +
+  # guides(fill = guide_colourbar(direction = "horizontal", nbin = 50, title.vjust = 0.7, barwidth = 15)) +
+  theme(legend.position = 'bottom')
+
+fig2a
+# 
+# df %>%
+#   filter(tool == 'Single Copy Genes') %>%
+#   ggplot() +
+#   geom_tile(aes(x = Outgroup, y = Escovopsis, fill = NumberGenes)) +
+#   geom_line(data = line_data, aes(x = x, y=y), linetype = "dashed", colour = 'grey') +
+#   theme_classic() +
+#   scale_x_continuous(breaks = seq(0, max(df$Outgroup)), 
+#                      labels = seq(0, max(df$Outgroup)), 
+#                      expand = c(0, 0)) +
+#   scale_y_continuous(breaks = seq(0, max(df$Escovopsis)), 
+#                      labels = seq(0, max(df$Escovopsis)), 
+#                      expand = c(0, 0)) +
+#   scale_fill_gradientn(breaks = c(1, seq(100, 1600, by = 200)),
+#                        labels = c(1, seq(100, 1600, by = 200)),
+#                        colours = colors_heat(10),
+#                        values = c(0, 0.01, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6,0.7, 0.8, 0.9, 1), 
+#                        guide="colourbar") +
+#   guides(fill = guide_colourbar(barheight = 20, direction = "vertical",
+#                                 title.position="top", title.hjust = 0.5,title.vjust = 0.5, nbin = 50))
+
+
+
+```
+
+```{r fig3b-all}
+##################################################################
+#### TRYING DIVERSITY METRICS 
+#################################################################
+
+tools <- as.character(unique(orthog_meta_ls$tool))
+
+div_mats <- lapply(tools, function(x){
+  div_mat <- orthog_meta_ls %>% select(genome, tool, annotation) %>%
+    filter(tool == x) %>%
+    select(-tool) %>%
+    group_by(genome, annotation) %>%
+    mutate(n_annotation = length(annotation)) %>%
+    ungroup() %>%
+    distinct() %>%
+    spread(annotation, n_annotation) %>%
+    column_to_rownames(var = 'genome')
+  div_mat[is.na(div_mat)] <- 0
+  div_mat = div_mat[, colSums(div_mat) >= 10]
+  as.matrix(div_mat)
+})
+
+names(div_mats) <- tools
+
+div_out <- lapply(names(div_mats), function(x){
+  print(x)
+  div_mat <- div_mats[[x]]
+  H <- diversity(div_mat) ## shannon index
+  evenness <- H/log(specnumber(div_mat)) ## evenness
+  simp <- diversity(div_mat, "simpson")
+  invsimp <- diversity(div_mat, "inv")
+  S <- specnumber(div_mat) # observed number of species
+  
+  cbind(S, H, evenness, simp, invsimp) %>% 
+    data.frame() %>%
+    rownames_to_column(var = 'genome') %>%
+    mutate(tool = x)
+}) %>%
+  bind_rows() %>%
+  left_join(., metadata, by = 'genome')
+
+div_out$Agriculture <- factor(div_out$Agriculture, levels = rev(c("Trichoderma",
+                                                                                "Hypomyces_Cladobotryum",
+                                                                                "Lower",
+                                                                                "Coral",
+                                                                                "Higher",
+                                                                                "Leafcutter"
+)))
+
+
+
+
+
+          
+# div_out %>% ggplot(., aes(x = S, y = H, color = Agriculture)) +
+#   geom_point(size = 2) +
+#   scale_color_manual(values = colors[na.omit(unique(metadata$Agriculture))]) +
+#   theme_classic() +
+#   labs(y = 'Entropy', x = 'Number of Genes') +
+#   facet_wrap(~tool, nrow = 3, ncol = 3, scales = 'free') 
+# 
+# div_out %>%
+#   ggplot(., aes(x = Agriculture, y = H, color = Agriculture)) +
+#   geom_boxplot() +
+#   scale_color_manual(values = colors[na.omit(unique(metadata$Agriculture))]) +
+#   theme_classic() +
+#   facet_wrap(~tool, nrow = 3, ncol = 3, scales = 'free') +
+#   labs(y = 'Entropy', x = '') +
+#   theme(axis.text.x = element_blank(), axis.ticks.x = element_blank()) 
+# 
+# 
+# div_out %>%
+#   ggplot(., aes(x = Agriculture, y = S, color = Agriculture)) +
+#   geom_boxplot() +
+#   scale_color_manual(values = colors[na.omit(unique(metadata$Agriculture))]) +
+#   theme_classic() +
+#   facet_wrap(~tool, nrow = 3, ncol = 3, scales = 'free') +
+#   labs(y = 'Gene Richness', x = '') +
+#   theme(axis.text.x = element_blank(), axis.ticks.x = element_blank()) 
+# 
+# 
+# 
+# div_out %>%
+#   ggplot(., aes(x = Agriculture, y = evenness, color = Agriculture)) +
+#   geom_boxplot() +
+#   scale_color_manual(values = colors[na.omit(unique(metadata$Agriculture))]) +
+#   theme_classic() +
+#   facet_wrap(~tool, nrow = 3, ncol = 3, scales = 'free') +
+#   labs(y = 'Gene Evenness', x = '') +
+#   theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
+
+
+
+
+plot_ls <- lapply(unique(div_out$tool), function(x){
+  div_out %>% select(Agriculture, H, tool, S, evenness) %>%
+    gather(metric, value, -tool, -Agriculture) %>%
+    mutate(metric_n = case_when(
+      metric == 'H' ~ 'Shannon Diversity',
+      metric == 'S' ~ 'Number of Genes',
+      metric == 'evenness' ~ 'Evenness'
+    )) %>% 
+    filter(tool == x) %>%
+    ggplot(., aes(x = Agriculture, y = value, color = Agriculture, group = Agriculture)) +
+    geom_boxplot() +
+    scale_color_manual(values = colors[na.omit(unique(metadata$Agriculture))]) +
+    theme_classic() +
+    theme(legend.position = 'none') +
+    labs(y = '', x = '', title = x) +
+    facet_wrap(~ metric_n, scales = 'free') +
+    theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
+})
+
+
+
+all <- cowplot::plot_grid(plotlist = plot_ls, labels = 'AUTO', ncol = 1)
+outfile = 'plots/gene_copy_box_diversity_all_metrics.pdf'
+save_plot(plot = all, filename = outfile, base_height = 20, base_width = 5)
+outfile = 'plots/gene_copy_box_diversity_all_metrics.png'
+save_plot(plot = all, filename = outfile, base_height = 20, base_width = 5)
+
+div_out$tool <- factor(div_out$tool, levels = unique(div_out$tool))
+
+
+
+div_out$tool <- factor(div_out$tool, levels = c('CAZyme Genes', 'Lipase Genes', 'Peptidase Genes', 'BGC', 'Resistance Genes', 'Virulence Genes', 'Single Copy Genes'))
+
+fig2b <- div_out %>% 
+  filter(tool != 'Single Copy Genes') %>%
+  ggplot(., aes(x = S, y = H, color = Agriculture)) +
+  geom_jitter(size = 2) +
+  scale_color_manual(values = colors[na.omit(unique(metadata$Agriculture))]) +
+  theme_classic() +
+  theme(legend.position = 'bottom') +
+  labs(y = 'Entropy', x = 'Number of Genes') +
+  facet_wrap(~tool, scales = 'free')
+
+
+
+
+
+
+cowplot::plot_grid(plotlist = list(fig2a, fig2b), labels = 'AUTO') %>%
+  ggsave2( filename = 'plots/figure3.png', height = 8, width = 12)
+
+
+
+## SCG plots
+
+
+scg2 <- div_out %>% 
+  filter(tool == 'Single Copy Genes') %>%
+  ggplot(., aes(x = S, y = H, color = Agriculture)) +
+  geom_jitter(size = 4) +
+  scale_color_manual(values = colors[na.omit(unique(metadata$Agriculture))]) +
+  theme_classic(base_size = 20) +
+  theme(legend.position = 'none') +
+  #labs(y = 'Entropy', x = 'Number of Genes')
+  labs(y = '', x = '')
+
+
+
+
+scg1 <- df %>%
+    filter(tool == 'Single Copy Genes') %>%
+  ggplot() +
+  geom_point(aes(x = Outgroup, y = Escovopsis, size = NumberGenes)) +
+  #geom_tile(aes(x = Outgroup, y = Escovopsis, fill = NumberGenes)) +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", colour = 'grey') +
+  theme_classic(base_size = 20) +
+   labs(y = 'Median Copy Number in Escovopsis',
+         x = 'Median Copy Number in Outgroups') +
+    labs(y = '',
+        x = '') +
+  scale_x_continuous(breaks = seq(0, max(df$Outgroup), by = 2),
+                     labels = seq(0, max(df$Outgroup), by = 2)) +
+  scale_y_continuous(breaks = seq(0, max(df$Escovopsis)),
+                     labels = seq(0, max(df$Escovopsis))) +
+  theme(legend.position = 'none') 
+
+cowplot::plot_grid(plotlist = list(scg1, scg2), labels = 'AUTO') %>%
+  ggsave2( filename = 'plots/single_copy_gene_diversity.png', height = 8, width = 12)
+
+## BGC loss
+df %>% filter(tool == 'BGC') %>% filter(Escovopsis == 0 , Outgroup > 0) %>% summarize(sum(NumberGenes))
+
+## BGC GAIN
+df %>% filter(tool == 'BGC') %>% filter(Escovopsis > 0 , Outgroup == 0) %>% summarize(sum(NumberGenes))
+
+```
+
+
+```{r heatmap_sig_genes_ag}
+###############################################
+### REPEAT ABOVE BUT WITHIN ANT AGRICULTURE ###
+###############################################
+
+
+ant_ag <- c('Coral', 'Higher', 'Lower', 'Leafcutter')
+
+
+x <- tools[1]
+div_mats_ag <- lapply(tools, function(x){
+  div_mat <- orthog_meta_ls %>% 
+    mutate(Agriculture = ifelse(!Agriculture %in% ant_ag, yes = 'Outgroup', no = Agriculture)) %>%
+    select(Agriculture, genome, tool, annotation) %>%
+    filter(tool == x) %>%
+    select(-tool) %>%
+    mutate(count = 1) %>%
+    group_by(genome, annotation) %>%
+    mutate(n_annotation = sum(count)) %>%
+    ungroup() %>%
+    distinct() %>%
+    group_by(Agriculture, annotation) %>%
+    mutate(median_count = median(n_annotation)) %>%
+    ungroup() %>%
+    select(-genome, -count, -n_annotation) %>%
+    distinct() %>%
+    spread(Agriculture, median_count) %>%
+    column_to_rownames(var = 'annotation')
+  div_mat[is.na(div_mat)] <- 0
+  div_mat <- div_mat[rowSums(div_mat) > 0, ]
+  div_mat
+})
+
+names(div_mats_ag) <- tools
+gene_pvals <- lapply(div_mats_ag, function(y){
+  apply(y, 1, function(x) chisq.test(x, simulate.p.value = TRUE)$p.value)
+})
+
+
+x <- gene_pvals[[1]]
+names(gene_pvals) <- tools
+
+significant_genes <- lapply(names(gene_pvals), function(y){
+  x <- gene_pvals[[y]]
+  sig <- x[which(x <= 0.05)]
+  data.frame(pvalue = sig, annotation = names(sig), stringsAsFactors = FALSE) %>% 
+    mutate(tool = y) 
+}) %>% bind_rows()
+
+
+
+
+# div_out <- lapply(names(div_mats_ag), function(x){
+#   div_mat <-div_mats_ag[[x]]
+#   H <- diversity(div_mat) ## shannon index
+#   evenness <- H/log(specnumber(div_mat)) ## evenness
+#   simp <- diversity(div_mat, "simpson")
+#   invsimp <- diversity(div_mat, "inv")
+#   S <- specnumber(div_mat) # observed number of species
+# 
+#   cbind(S, H, evenness, simp, invsimp) %>%
+#     data.frame() %>%
+#     rownames_to_column(var = 'genome') %>%
+#     mutate(tool = x)
+# }) %>%
+#   bind_rows() %>%
+#   left_join(., metadata, by = 'genome')
+# 
+# div_out$Agriculture <- factor(div_out$Agriculture, levels = rev(c("Trichoderma",
+#                                                                   "Hypomyces_Cladobotryum",
+#                                                                   "Lower",
+#                                                                   "Coral",
+#                                                                   "Higher",
+#                                                                   "Leafcutter"
+# )))
+# 
+# nmds_all <- lapply(tools, function(y){
+#   x <-div_mats_ag[[y]]
+#   pca_out    <- prcomp(x)
+#   eigs       <- pca_out$sdev^2
+#   proportion <- (eigs/sum(eigs))*100
+#   cumulative <- cumsum(eigs)/sum(eigs)
+#   n_k        <- length(which(proportion >= 10))
+# 
+#   if(n_k < 2){
+#     n_k = 2
+#   }
+#   print(paste(y, n_k))
+# 
+#   mds <- metaMDS(x, k = n_k) # The number of reduced dimensions ## components with >10% variance explained
+# })
+# 
+# 
+# names(nmds_all) <- tools
+# converged <- lapply(nmds_all, function(x){x$converged})
+# 
+# 
+# 
+# 
+# 
+# 
+# #o# make stressplots
+# 
+# nmds_all <- nmds_all#[which(converged == TRUE)] ## only keep ones that converge
+# 
+# 
+# 
+# tools_sub <-tools#[which(converged == TRUE)]
+# 
+# 
+# x <- tools_sub[1]
+# 
+# lapply(tools_sub, function(x){
+#   png(file = paste0('plots/', x, "-stress.png"))
+#   stressplot(nmds_all[[x]])
+#   dev.off()
+# })
+# 
+# 
+# 
+# 
+# gene_pvals <- lapply(tools_sub, function(y){
+#   print(y)
+#   nmds              <- nmds_all[[y]]
+#   x                 <- div_mats_ag[[y]]
+#   vec.sp            <- envfit(nmds$points, x, perm=1000)
+#   vec.sp.df         <- as.data.frame(vec.sp$vectors$arrows*sqrt(vec.sp$vectors$r))
+#   vec.sp.df$pval    <- vec.sp$vectors$pval
+#   vec.sp.df$annotation <- rownames(vec.sp.df)
+#   vec.sp.df$tool <- y
+#   vec.sp.df
+# })
+# names(gene_pvals) <- tools_sub
+# 
+# env <- metadata %>%
+#   select(genome, Agriculture, coordinates, Host, cultivar)%>% 
+#   mutate(Agriculture = ifelse(!Agriculture %in% ant_ag, yes = 'Outgroup', no = Agriculture)) %>%
+#   filter(!genome %in% c('Hypomyces rosellus', 'Hypomyces polyporinus', 'Hypomyces odoratus')) %>%
+#   column_to_rownames(var = 'genome')
+#   
+# 
+# 
+# y = "Virulence Genes"
+# metadata_centroids <- lapply(tools_sub, function(y){
+#   print(y)
+#   nmds              <- nmds_all[[y]]
+#   vec.sp            <- envfit(nmds$points, env, perm=1000, na.rm = TRUE)
+#   vec.sp.df <- cbind(rownames(vec.sp$factors$centroids), vec.sp$factors$centroids, vec.sp$factors$var.id) %>% data.frame(stringsAsFactors = FALSE)
+#   colnames(vec.sp.df) <- c('id', 'MDS1', 'MDS2', 'metadata_type')
+#   vec.sp.df$tool <- y
+#   vec.sp.df$pvals <- vec.sp$factors$pvals[vec.sp.df$metadata]
+#   vec.sp.df %>%
+#     mutate_at(c('MDS2', 'MDS1'), as.numeric)
+# }) %>% bind_rows()
+# 
+# all_counts <- do.call(cbind, div_mats) %>% 
+#   t() %>%
+#   data.frame(., stringsAsFactors = FALSE) %>%
+#   rownames_to_column(var = 'annotation') 
+# 
+# 
+# 
+# 
+
+
+
+
+all_counts <- do.call(cbind, div_mats) %>%
+  t() %>%
+  data.frame(., stringsAsFactors = FALSE) %>%
+  rownames_to_column(var = 'annotation')
+
+# out_counts <- do.call(cbind, div_mats) %>%
+#   t() %>%
+#   data.frame(., stringsAsFactors = FALSE)
+# 
+# 
+# out_counts <- out_counts[, which(!colnames(out_counts) %in% colnames(all_counts))] %>%
+#   rownames_to_column(var = 'annotation')
+# all_counts <- all_counts %>% left_join(., out_counts, by =  'annotation')
+
+
+
+# genes_keep <- all_counts %>%
+#   gather(genome, count, -annotation) %>%
+#   left_join(., metadata, by = 'genome') %>%
+#   group_by(Agriculture, annotation) %>%
+#   mutate(ag_count = median(count)) %>%
+#   ungroup()  %>%
+#   select(annotation, Agriculture, ag_count) %>%
+#   distinct() %>%
+#   spread(Agriculture, ag_count) %>%
+#   mutate(Outgroup = median(Hypomyces_Cladobotryum, Trichoderma)) %>%
+#   gather(ag, ag_count, -Outgroup, -annotation) %>%
+#   mutate(fc = ag_count+0.00000001/Outgroup+0.00000001) %>% ### add a really small number to remove -Infs
+#   mutate(log_fc = log(fc)) %>%
+#   filter(log_fc <= -0.5 | log_fc >= 0.5) %>%
+#   .$annotation
+
+#all_counts
+pvals_all <- significant_genes %>% 
+  inner_join(all_counts, by = 'annotation') 
+
+write_csv(pvals_all, 'tables/chi_square_significant_genes_ant_agriculture.csv')
+
+#pvals_all <- read_csv('tables/nmds_significant_genes_ant_agriculture.csv')
+
+#pvals_all %>% filter(pval <= 0.001)
+
+#lapply(gene_pvals, function(x){
+ # x %>% filter(pval <= 0.001) %>% nrow()
+#)
+
+
+#lapply(div_mats, nrow)
+
+
+### MAKE HEATMAP OF COUNTS OF SIGNIFICANT GENES
+
+# pvals_all <- gene_pvals %>% bind_rows() %>%
+#   left_join(all_counts, by = 'annotation') %>%
+#   filter(pval <= 0.01) %>%
+#   select(-contains('MDS'), -pval)
+
+
+pvals_heat <- pvals_all %>%
+  select(-tool, -pvalue) %>%
+  column_to_rownames(var = 'annotation') %>%
+  t()
+
+pvals_heat <- pvals_heat[,which(colSums(pvals_heat) > 0)]
+
+
+pvals_heat_norm <- sweep(pvals_heat, 2, colSums(pvals_heat), `/`)
+
+
+result <- pvclust(pvals_heat_norm, method.dist="binary",
+                  method.hclust="average", nboot=100)
+
+
+pdf('plots/chi_square_significant_genes_ant_agriculture_heat_hclust_pvals.pdf', width = 10)
+plot(result, labels = FALSE)
+dev.off()
+
+
+col_annot <- pvals_all %>% 
+  select(annotation, tool) %>%
+  filter(annotation %in% colnames(pvals_heat)) %>%
+  column_to_rownames(var = 'annotation') %>%
+  rename('Annotation' = tool)
+
+col_annot$Annotation <- factor(col_annot$Annotation, levels = unique(col_annot$Annotation))
+
+
+annot_colors = brewer.pal(length(unique(col_annot$Annotation)), 'Dark2')
+names(annot_colors)        <- unique(col_annot$Annotation)
+
+annot_row <- metadata %>% select(genome, Agriculture) %>% na.omit() %>%
+  column_to_rownames(var = 'genome')
+
+
+
+#names(annot_colors) <- factor(unique(col_annot$Annotation), levels = unique(col_annot$Annotation))
+annot_colors_ls     <- list(Annotation = annot_colors,
+                            Agriculture = colors[unique(annot_row$Agriculture)])
+
+
+pheatmap(pvals_heat_norm[order[-1],],
+         color = colorRampPalette(brewer.pal(n = 5, name = "Greens"))(100),
+         cluster_rows = FALSE,
+         cluster_cols = result$hclust,
+         show_colnames = F,
+         annotation_col = col_annot,
+         annotation_row = annot_row, 
+         annotation_colors = annot_colors_ls,
+         cellheight = 9,
+         filename = 'plots/chi_square_significant_genes_ant_agriculture_heat.pdf'
+         ) 
+pheatmap(pvals_heat_norm[order[-1], ],
+         color = colorRampPalette(brewer.pal(n = 5, name = "Greens"))(100),
+         cluster_rows = FALSE,
+         cluster_cols = result$hclust,
+         show_colnames = F,
+         annotation_col = col_annot,
+         annotation_row = annot_row, 
+         annotation_colors = annot_colors_ls,
+         cellheight = 9,
+         filename = 'plots/chi_square_significant_genes_ant_agriculture_heat.png'
+         ) 
+
+# ## cut result into three groups
+# hr <- result$hclust
+# mycl <- cutree(hr, k = 8)
+# 
+# # get a color palette equal to the number of clusters
+# clusterCols <- rainbow(length(unique(mycl)))
+# 
+# # create vector of colors for side bar
+# myClusterSideBar <- clusterCols[mycl]
+# 
+# # choose a color palette for the heat map
+# 
+# 
+# 
+# # draw the heat map
+# pdf('test.pdf')
+# heatmap.2(pvals_heat_norm[order[-1], ], main="Hierarchical Cluster", 
+#           Colv=as.dendrogram(hr),
+#           density.info="none", 
+#           trace="none", ColSideColors= myClusterSideBar)
+# dev.off()
+# 
+tree_cut <- cutree(result$hclust, h = c(0.3, 0.4, 0.5, 0.6, 0.7))
+# 
+annot_tool <- annot %>% select(tool, annotation) %>% distinct()
+
+foo <- cbind(t(pvals_heat), clusterID=tree_cut) %>% 
+  data.frame() %>% rownames_to_column(var = 'annotation') %>%
+  rename('cluster_0.3' = X0.3,
+         'cluster_0.4' = X0.4,
+    'cluster_0.5' = X0.5,
+         'cluster_0.6' = X0.6,
+         'cluster_0.7' = X0.7)%>% 
+  left_join(., annot_tool, by = 'annotation') %>%
+  select(contains('cluster'), tool, annotation, everything()) %>%
+  gather(genome, count, -contains('cluster'), -tool, -annotation) %>%
+  left_join(., metadata, by = 'genome') %>%
+  group_by(Agriculture, annotation) %>%
+  mutate(ag_count = mean(count)) %>%
+  ungroup() %>%
+  select(contains('cluster'), tool, annotation, Agriculture, ag_count) %>%
+  distinct() %>%
+  spread(Agriculture, ag_count) %>%
+  data.frame()
+
+rownames(foo) <- foo$annotation
+
+
+write_csv(foo[result$hclust$order,], 'tables/chi_square_significant_genes_ant_agriculture_clusterid.csv')
+
+
+
+```
+
+```{r heatmap_sig_genes_single, eval = FALSE}
+
+
+#all_counts
+
+lapply(gene_pvals, function(x){
+  ten_perc <- ceiling(length(x$pval)/10)
+  pval_cutoff <- max(sort(x$pval)[1:ten_perc] )
+  pvals_all <- x %>% bind_rows() %>% 
+    filter(pval <= pval_cutoff) %>%
+    inner_join(all_counts, by = 'annotation') %>%
+    select(-contains('MDS'), -pval)
+  
+  pvals_heat <- pvals_all %>%
+    select(-tool) %>%
+    column_to_rownames(var = 'annotation') %>%
+    t()
+  
+  pvals_heat <- pvals_heat[,which(colSums(pvals_heat) > 0)]
+  
+  
+  pvals_heat_norm <- sweep(pvals_heat, 2, colSums(pvals_heat), `/`)
+  
+  
+  annot_row <- metadata %>% 
+    select(genome, Agriculture) %>% na.omit() %>%
+    column_to_rownames(var = 'genome')
+  
+  
+  
+  annot_colors_ls     <- list(Agriculture = colors[unique(annot_row$Agriculture)])
+  
+  pvals_heat_norm[pvals_heat_norm > 0.2] <- 0.2
+  
+  outfile = paste0('plots/nmds_significant_genes_ant_agriculture_heat_', unique(x$tool), '.pdf')
+  title = paste(unique(x$tool), pval_cutoff)
+  
+  pheatmap(pvals_heat_norm[order[-1], ],
+           color = colorRampPalette(brewer.pal(n = 5, name = "Greens"))(100),
+           cluster_rows = FALSE,
+           cluster_cols = TRUE,
+           show_colnames = F,
+           annotation_row = annot_row, 
+           annotation_colors = annot_colors_ls,
+           filename = outfile,
+           main = title
+           ) 
+  
+  
+  ## cut result into three groups
+  
+  annot_tool <- annot %>% select(tool, annotation) %>% distinct()
+  
+  foo <- t(pvals_heat) %>% 
+    data.frame() %>% rownames_to_column(var = 'annotation') %>%
+    left_join(., annot_tool, by = 'annotation') %>%
+    select(contains('cluster'), tool, annotation, everything()) %>%
+    gather(genome, count, -contains('cluster'), -tool, -annotation) %>%
+    left_join(., metadata, by = 'genome') %>%
+    group_by(Agriculture, annotation) %>%
+    mutate(ag_count = median(count)) %>%
+    ungroup() %>%
+    select(contains('cluster'), tool, annotation, Agriculture, ag_count) %>%
+    distinct() %>%
+    spread(Agriculture, ag_count) %>%
+    data.frame()
+  
+  rownames(foo) <- foo$annotation
+  
+  tbl_out = paste0('tables/nmds_significant_genes_ant_agriculture_', unique(x$tool), '.csv')
+  write_csv(foo[result$hclust$order,], tbl_out)
+
+})
+
+```
+
+
+```{r eval = FALSE}
+
+
+
+count_heat <- all_counts %>% filter(annotation %in% genes_keep) %>%
+  left_join(., annot_tool, by = 'annotation')
+
+
+
+
+col_annot <-count_heat %>% 
+  select(annotation, tool) %>%
+  column_to_rownames(var = 'annotation') %>%
+  rename('Annotation' = tool)
+
+col_annot$Annotation <- factor(col_annot$Annotation, levels = unique(col_annot$Annotation))
+
+
+annot_colors = brewer.pal(length(unique(col_annot$Annotation)), 'Dark2')
+names(annot_colors)        <- unique(col_annot$Annotation)
+
+annot_row <- metadata %>% select(genome, Agriculture) %>% na.omit() %>%
+  column_to_rownames(var = 'genome')
+
+
+
+#names(annot_colors) <- factor(unique(col_annot$Annotation), levels = unique(col_annot$Annotation))
+annot_colors_ls     <- list(Annotation = annot_colors,
+                            Agriculture = colors[unique(annot_row$Agriculture)])
+
+
+count_mat <- count_heat %>%
+  select(-tool) %>% 
+  column_to_rownames(var = 'annotation')%>%
+  t()
+
+heat_norm <- sweep(count_mat, 2, colSums(count_mat), `/`)
+  
+  
+
+pheatmap(heat_norm[order[-1], ],
+         color = colorRampPalette(brewer.pal(n = 5, name = "Greens"))(100),
+         cluster_rows = FALSE,
+         cluster_cols = TRUE,
+         show_colnames = F,
+         annotation_col = col_annot,
+         annotation_row = annot_row, 
+         annotation_colors = annot_colors_ls,
+         filename = 'plots/test_heat.pdf'
+         ) 
+
+```
+

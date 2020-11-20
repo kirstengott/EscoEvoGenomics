@@ -3,21 +3,16 @@ library(pheatmap)
 library(vegan)
 library(ggord)
 library(dendextend)
-
+library(pvclust)
 munge_gca <- function(x){
   paste(strsplit(x, split = "_")[[1]][c(1,2)], collapse = "_")
 }
 
 
-colors <- c("Coral" = "#CE3DD0",
-                "Higher" = "#2D71F6",
-                "Lower" = "#b8860b",
-                "Leafcutter" = "#377D22",
-                "Outgroup1" = 'black',
-                "Outgroup2" = 'gray')
+source('scripts/color_palettes.R')
 
-
-metadata <- read_csv('tables/metadata.csv')
+metadata <- read_csv('tables/metadata.csv') %>%
+  filter(!is.na(acc), !is.na(genus_species))
 meta_levels <- metadata$genus_species
 
 ## dive in deeper to presence absence output
@@ -57,7 +52,18 @@ all_data <- lapply(files, function(x){
   mutate(bgc_plot_label = ifelse(any(grepl('BGC', acc)),
                                  yes = paste(grep('BGC', acc, value = TRUE), collapse = ","),
                                  no = paste0(BGC_type, "_", component))) %>%
+  ungroup() %>%
+  group_by(component) %>%
+  mutate(n_genomes = length(unique(acc))) %>%
+  ungroup() %>%
+  group_by(acc) %>%
+  mutate(n_BGC = length(unique(component))) %>%
   ungroup()
+
+all_data %>%
+  ggplot(., aes(x = BGC_type, y = n_genomes)) +
+  geom_violin(draw_quantiles = c(0.25, 0.5, 0.75)) +
+  theme_classic()
 
 
 #View(select(all_data, component, Agriculture, bigscape, num_agricultures, BGC_type))
@@ -72,85 +78,24 @@ all_data <- lapply(files, function(x){
 
 ann_colors = list(
   'BGC_type' = c(NRPS = '#1B9E77', PKSI = '#D95F02', Terpene = '#7570B3', Others = "#E7298A", PKS.NRP = "#66A61E"),
-  'Agriculture' = c(Lower = '#FFFEAB',
-                      Coral = "#CE3DD0",
-                      Higher = "#2D71F6",
-                      Leafcutter = "#377D22", Outgroup2 = 'gray', Outgroup1 = 'black'))
+  'Agriculture' = colors[-which(names(colors) %in% c('Trichoderma', 'Hypomyces_Cladobotryum'))])
 
-
-all_bgc <- all_data %>%
-  filter(!BGC_type %in% c('PKSother', 'mix'),
-         num_agricultures > 0,
-         !grepl('BGC', acc)) %>% ## only look at BGC that are in at least 1 ant agriculture
-  select(bgc_plot_label, genus_species, Presence, BGC_type) %>%
-  mutate(bgc_plot_label = sub('-', '.', bgc_plot_label)) %>%
-  mutate(BGC_type = sub('-', '.', BGC_type))
-
-
-
-all_data %>% filter(num_agricultures >= 3) %>%
-  distinct() %>%
-  rowwise() %>%
-  mutate(file = grep(paste0(component, ".gff3"), list.files('bigscape/gff3', pattern = BGC_type, full.names = TRUE), value = TRUE)) %>%
-  select(file) %>%
-  distinct() %>%
-  write_tsv(., path = 'tables/bgc_greater_than_2_ags.txt', col_names = FALSE)
-
-all_bgc_s <- all_bgc %>% select(-BGC_type) %>%
-  distinct() %>%
-  spread(bgc_plot_label, Presence) %>%
+m <- metadata %>% 
+  select(Agriculture, genus_species) %>%  
+  mutate(Agriculture = replace_na(Agriculture, 'Outgroup')) %>%
+  distinct() %>% 
   data.frame()
-
-rownames(all_bgc_s) <- all_bgc_s$genus_species
-
-all_bgc_s$genus_species <- NULL
-all_bgc_s <- as.matrix(all_bgc_s)
-all_bgc_s[is.na(all_bgc_s)] <- 0
-
-## rows are genomes
-rows_order <- meta_levels[which(meta_levels %in% rownames(all_bgc_s))]
-
-m <- metadata %>% select(Agriculture, genus_species) %>%  mutate(Agriculture = replace_na(Agriculture, 'Outgroup')) %>%
-  distinct() %>% data.frame()
-rownames(m) <- m$genus_species
+rownames(m) <- make.unique(m$genus_species)
 m$genus_species <- NULL
 
 
 
 
-annotation_col <- all_bgc %>%
-  select(-genus_species, -Presence) %>%
-  filter(bgc_plot_label %in% colnames(all_bgc_s)) %>%
-  distinct() %>%
-  data.frame()
 
-rownames(annotation_col) <- annotation_col$bgc_plot_label
-annotation_col$bgc_plot_label <- NULL
+##################################################
+### Ordinate all BGCs with no threshold cutoff ###
+##################################################
 
-
-annotation_row = data.frame(
-     "Agriculture" = m[rownames(all_bgc_s), ],
-     row.names = rownames(all_bgc_s),
-    stringsAsFactors = FALSE
-   )
-
-
-pheatmap::pheatmap(all_bgc_s[rows_order,],
-                   legend = FALSE,
-                   color = c('grey87', 'black'),
-                   cluster_rows = TRUE,
-                   cluster_cols = TRUE,
-                   border_color = "grey70",
-                   cellwidth = 10,
-                   cellheight = 10,
-                   annotation_row = annotation_row,
-                   annotation_col = annotation_col,
-                   annotation_colors = ann_colors,
-                   filename = paste0('plots/all_BGC_components_heatmap.pdf'))
-
-
-
-## Ordinate all BGCs with no threshold cutoff
 
 all_bgc <- all_data %>%
   filter(!BGC_type %in% c('mix'),
@@ -166,18 +111,21 @@ all_bgc_s <- all_bgc %>% select(-BGC_type) %>%
   spread(bgc_plot_label, Presence) %>%
   data.frame()
 
-
 rownames(all_bgc_s) <- all_bgc_s$genus_species
 all_bgc_s$genus_species <- NULL
 all_bgc_s <- as.matrix(all_bgc_s)
 all_bgc_s[is.na(all_bgc_s)] <- 0
 
 
+####################################################
+### MAKE CLUSTERS FOR HEATMAPS FROM FULL DATASET ###
+####################################################
 
+dend_colors        <- metadata$Agriculture
+names(dend_colors) <- metadata$genus_species
 
-library(pvclust)
 set.seed(1234)
-result <- pvclust(t(all_bgc_s), method.dist="cor",
+result <- pvclust(t(all_bgc_s), method.dist="binary",
                   method.hclust="average", nboot=100)
 
 pdf(file = 'plots/bootstrapped_BGC_dendrogram.pdf')
@@ -185,15 +133,11 @@ plot(result)
 pvrect(result, pv = 'bp')
 dev.off()
 
-dend_colors        <- metadata$Agriculture
-names(dend_colors) <- metadata$genus_species
 
 
 hcd <- as.dendrogram(result)  %>%
   set("leaves_pch", 19) %>%
   set("leaves_col", colors[dend_colors[result$hclust$labels[result$hclust$order]]])
-
-
 
 pdf(file = 'plots/bootstrapped_BGC_dendrogram_colors.pdf')
 par(mar = c(2, 2, 2, 10))
@@ -201,6 +145,13 @@ plot(hcd, horiz = TRUE, edgePar = list(lwd = 2))
 dev.off()
 
 
+## use these clusters laster for the pheatmap
+clusters <- result$hclust
+
+
+################
+### ORDINATE ###
+################
 
 pca_data <- prcomp(all_bgc_s)
 eigs <- pca_data$sdev^2
@@ -209,19 +160,12 @@ head(proportion)
 cumulative = cumsum(eigs)/sum(eigs)
 screeplot(pca_data)
 
-
 n_k <- length(which(proportion >= 10))
-
 ## nmds
 ## bray curtis distance is more resilient to nulls
 example_NMDS=metaMDS(all_bgc_s, k = 2) # The number of reduced dimensions ## components with >10% variance explained
-
 stressplot(example_NMDS)
-
-
 treat = replace_na(annotation_row[,'Agriculture'], replace = 'Outgroup') ## corresponds to rows/communities (genomes)
-
-
 ## test for significance
 bgc_dist <- vegdist(all_bgc_s)
 ano_test <- anosim(bgc_dist, grouping = treat)
@@ -252,20 +196,21 @@ ggplot(data2, aes(x = MDS1, y = MDS2)) +
 
 
 
+#############################################
+###            UNMIX AGRICULTURE > 0      ###
+############################################# 
 
 
-## Make the same plots for the 'mix' analysis
 
 
 
 all_bgc <- all_data %>%
-  filter(BGC_type %in% c('mix'),
+  filter(!BGC_type %in% c('PKSother', 'mix'),
          num_agricultures > 0,
          !grepl('BGC', acc)) %>% ## only look at BGC that are in at least 1 ant agriculture
   select(bgc_plot_label, genus_species, Presence, BGC_type) %>%
-  mutate(bgc_plot_label = sub('-', '.', bgc_plot_label))
-
-#all_bgc %>% filter(component == 'component_111', BGC_type == 'mix') %>% View()
+  mutate(bgc_plot_label = sub('-', '.', bgc_plot_label)) %>%
+  mutate(BGC_type = sub('-', '.', BGC_type))
 
 all_bgc_s <- all_bgc %>% select(-BGC_type) %>%
   distinct() %>%
@@ -277,33 +222,135 @@ all_bgc_s$genus_species <- NULL
 all_bgc_s <- as.matrix(all_bgc_s)
 all_bgc_s[is.na(all_bgc_s)] <- 0
 
+## rows are genomes
 rows_order <- meta_levels[which(meta_levels %in% rownames(all_bgc_s))]
 
-m <- metadata %>% select(Agriculture, genus_species) %>% mutate(Agriculture = replace_na(Agriculture, 'Outgroup')) %>%
-  distinct() %>% data.frame()
-rownames(m) <- m$genus_species
-m$genus_species <- NULL
 
 
+annotation_col <- all_bgc %>%
+  select(-genus_species, -Presence) %>%
+  filter(bgc_plot_label %in% colnames(all_bgc_s)) %>%
+  distinct() %>%
+  data.frame()
+
+rownames(annotation_col) <- annotation_col$bgc_plot_label
+annotation_col$bgc_plot_label <- NULL
 
 
 annotation_row = data.frame(
-  "Agriculture" = m[rownames(all_bgc_s), ],
-  row.names = rownames(all_bgc_s)
-)
+     "Agriculture" = m[rownames(all_bgc_s), ],
+     row.names = rownames(all_bgc_s),
+    stringsAsFactors = FALSE
+   )
 
-pheatmap::pheatmap(all_bgc_s[rows_order,],
+
+
+
+
+# cluster_df <- all_data %>%
+#   filter(num_agricultures > 0,
+#          !BGC_type %in% c('PKSother', 'mix'),
+#          !grepl('BGC', acc)) %>% ## only look at BGC that are in at least 1 ant agriculture
+#   select(bgc_plot_label, genus_species, Presence, BGC_type) %>%
+#   mutate(bgc_plot_label = sub('-', '.', bgc_plot_label)) %>%
+#   mutate(BGC_type = sub('-', '.', BGC_type)) %>%
+#   select(-BGC_type) %>%
+#   distinct() %>%
+#   spread(bgc_plot_label, Presence) %>%
+#   data.frame()
+# rownames(cluster_df) <- make.unique(cluster_df$genus_species)
+# cluster_df$genus_species <- NULL
+# cluster_df <- as.matrix(cluster_df)
+# cluster_df[is.na(cluster_df)] <- 0
+# clusters <- rev(hclust(dist(cluster_df, method = 'euclidean'), method = 'complete'))
+
+pheatmap::pheatmap(all_bgc_s,
                    legend = FALSE,
                    color = c('grey87', 'black'),
-                   cluster_rows = TRUE,
+                   cluster_rows = clusters,
                    cluster_cols = TRUE,
                    border_color = "grey70",
                    cellwidth = 10,
                    cellheight = 10,
                    annotation_row = annotation_row,
+                   annotation_col = annotation_col,
                    annotation_colors = ann_colors,
-                   filename = paste0('plots/all_BGC_components_mix_heatmap.pdf'))
-## Ordinate all BGCs
+                   filename = paste0('plots/all_BGC_components_heatmap.pdf'))
+
+
+
+
+
+#############################################
+###            UNMIX GENOMES >= 3         ###
+############################################# 
+
+
+
+
+all_bgc <- all_data %>%
+  filter(!BGC_type %in% c('PKSother', 'mix'),
+         n_genomes >= 3,
+         !grepl('BGC', acc)) %>% ## only look at BGC that are in at least 1 ant agriculture
+  select(bgc_plot_label, genus_species, Presence, BGC_type) %>%
+  mutate(bgc_plot_label = sub('-', '.', bgc_plot_label)) %>%
+  mutate(BGC_type = sub('-', '.', BGC_type))
+
+all_bgc_s <- all_bgc %>% select(-BGC_type) %>%
+  distinct() %>%
+  spread(bgc_plot_label, Presence) %>%
+  data.frame()
+
+rownames(all_bgc_s) <- all_bgc_s$genus_species
+all_bgc_s$genus_species <- NULL
+all_bgc_s <- as.matrix(all_bgc_s)
+all_bgc_s[is.na(all_bgc_s)] <- 0
+
+## rows are genomes
+rows_order <- meta_levels[which(meta_levels %in% rownames(all_bgc_s))]
+
+
+
+annotation_col <- all_bgc %>%
+  select(-genus_species, -Presence) %>%
+  filter(bgc_plot_label %in% colnames(all_bgc_s)) %>%
+  distinct() %>%
+  data.frame()
+
+rownames(annotation_col) <- annotation_col$bgc_plot_label
+annotation_col$bgc_plot_label <- NULL
+
+
+annotation_row = data.frame(
+  "Agriculture" = m[rownames(all_bgc_s), ],
+  row.names = rownames(all_bgc_s),
+  stringsAsFactors = FALSE
+)
+
+
+
+
+pheatmap::pheatmap(all_bgc_s,
+                   legend = FALSE,
+                   color = c('grey87', 'black'),
+                   cluster_rows = clusters,
+                   cluster_cols = TRUE,
+                   border_color = "grey70",
+                   cellwidth = 10,
+                   cellheight = 10,
+                   annotation_row = annotation_row,
+                   annotation_col = annotation_col,
+                   annotation_colors = ann_colors,
+                   filename = paste0('plots/all_BGC_components_heatmap_clustered_by_min3_genomes.pdf'))
+
+
+
+
+
+
+##############################################################
+### Ordinate all BGCs with no threshold cutoff MIX ANALYSIS###
+##############################################################
 
 all_bgc <- all_data %>%
   filter(BGC_type %in% c('mix'),
@@ -323,6 +370,49 @@ rownames(all_bgc_s) <- all_bgc_s$genus_species
 all_bgc_s$genus_species <- NULL
 all_bgc_s <- as.matrix(all_bgc_s)
 all_bgc_s[is.na(all_bgc_s)] <- 0
+
+
+
+####################################################
+### MAKE CLUSTERS FOR HEATMAPS FROM FULL DATASET ###
+####################################################
+
+dend_colors        <- metadata$Agriculture
+names(dend_colors) <- metadata$genus_species
+
+set.seed(1234)
+result <- pvclust(t(all_bgc_s), method.dist="binary",
+                  method.hclust="average", nboot=100)
+
+pdf(file = 'plots/bootstrapped_BGC_mix_dendrogram.pdf')
+plot(result)
+pvrect(result, pv = 'bp')
+dev.off()
+
+
+
+hcd <- as.dendrogram(result)  %>%
+  set("leaves_pch", 19) %>%
+  set("leaves_col", colors[dend_colors[result$hclust$labels[result$hclust$order]]])
+
+pdf(file = 'plots/bootstrapped_BGC_mix_dendrogram_colors.pdf')
+par(mar = c(2, 2, 2, 10))
+plot(hcd, horiz = TRUE, edgePar = list(lwd = 2))
+dev.off()
+
+
+## use these clusters laster for the pheatmap
+clusters <- result$hclust
+
+
+
+
+
+################
+### ORDINATE ###
+################
+
+
 
 
 pca_data <- prcomp(all_bgc_s)
@@ -372,6 +462,125 @@ ggplot(data2, aes(x = MDS1, y = MDS2)) +
             aes(label = genus_species, color = NULL), nudge_x = -0.04, hjust = 0) + 
   scale_fill_manual(values = colors) +
   ggsave('plots/BGC_mix_ord.pdf', width = 7, height = 7)
+
+
+
+## Make the same plots for the 'mix' analysis
+#############################################
+###            MIX AGRICULTURE > 0        ###
+############################################# 
+
+
+all_bgc <- all_data %>%
+  filter(BGC_type %in% c('mix'),
+         num_agricultures > 0,
+         !grepl('BGC', acc)) %>% ## only look at BGC that are in at least 1 ant agriculture
+  select(bgc_plot_label, genus_species, Presence, BGC_type) %>%
+  mutate(bgc_plot_label = sub('-', '.', bgc_plot_label))
+
+#all_bgc %>% filter(component == 'component_111', BGC_type == 'mix') %>% View()
+
+all_bgc_s <- all_bgc %>% select(-BGC_type) %>%
+  distinct() %>%
+  spread(bgc_plot_label, Presence) %>%
+  data.frame()
+
+rownames(all_bgc_s) <- all_bgc_s$genus_species
+all_bgc_s$genus_species <- NULL
+all_bgc_s <- as.matrix(all_bgc_s)
+all_bgc_s[is.na(all_bgc_s)] <- 0
+
+rows_order <- meta_levels[which(meta_levels %in% rownames(all_bgc_s))]
+
+m <- metadata %>% select(Agriculture, genus_species) %>% mutate(Agriculture = replace_na(Agriculture, 'Outgroup')) %>%
+  distinct() %>% data.frame()
+rownames(m) <- m$genus_species
+m$genus_species <- NULL
+
+
+
+
+annotation_row = data.frame(
+  "Agriculture" = m[rownames(all_bgc_s), ],
+  row.names = rownames(all_bgc_s)
+)
+
+
+pheatmap::pheatmap(all_bgc_s,
+                   legend = FALSE,
+                   color = c('grey87', 'black'),
+                   cluster_rows = clusters,
+                   cluster_cols = TRUE,
+                   border_color = "grey70",
+                   cellwidth = 10,
+                   cellheight = 10,
+                   annotation_row = annotation_row,
+                   annotation_colors = ann_colors,
+                   filename = paste0('plots/all_BGC_components_mix_heatmap.pdf'))
+
+
+#############################################
+###            MIX GENOMES >= 3           ###
+############################################# 
+
+all_bgc <- all_data %>%
+  filter(!BGC_type %in% c('PKSother', 'mix'),
+         n_genomes >= 3,
+         !grepl('BGC', acc)) %>% ## only look at BGC that are in at least 1 ant agriculture
+  select(bgc_plot_label, genus_species, Presence, BGC_type) %>%
+  mutate(bgc_plot_label = sub('-', '.', bgc_plot_label)) %>%
+  mutate(BGC_type = sub('-', '.', BGC_type))
+
+all_bgc_s <- all_bgc %>% select(-BGC_type) %>%
+  distinct() %>%
+  spread(bgc_plot_label, Presence) %>%
+  data.frame()
+
+rownames(all_bgc_s) <- all_bgc_s$genus_species
+all_bgc_s$genus_species <- NULL
+all_bgc_s <- as.matrix(all_bgc_s)
+all_bgc_s[is.na(all_bgc_s)] <- 0
+
+## rows are genomes
+rows_order <- meta_levels[which(meta_levels %in% rownames(all_bgc_s))]
+
+
+
+annotation_col <- all_bgc %>%
+  select(-genus_species, -Presence) %>%
+  filter(bgc_plot_label %in% colnames(all_bgc_s)) %>%
+  distinct() %>%
+  data.frame()
+
+rownames(annotation_col) <- annotation_col$bgc_plot_label
+annotation_col$bgc_plot_label <- NULL
+
+
+annotation_row = data.frame(
+  "Agriculture" = m[rownames(all_bgc_s), ],
+  row.names = rownames(all_bgc_s),
+  stringsAsFactors = FALSE
+)
+
+
+
+
+pheatmap::pheatmap(all_bgc_s,
+                   legend = FALSE,
+                   color = c('grey87', 'black'),
+                   cluster_rows = clusters,
+                   cluster_cols = TRUE,
+                   border_color = "grey70",
+                   cellwidth = 10,
+                   cellheight = 10,
+                   annotation_row = annotation_row,
+                   annotation_col = annotation_col,
+                   annotation_colors = ann_colors,
+                   filename = paste0('plots/all_BGC_components_mix_heatmap_clustered_by_min3_genomes.pdf'))
+
+
+
+
 
 
 

@@ -1,0 +1,1585 @@
+
+
+```{r}
+#library(KEGGREST)
+#library(GO.db)
+#library(GSEABase)
+library(pheatmap)
+library(RColorBrewer)
+library(VennDiagram)
+library(UpSetR)
+library(tidyverse)
+library(cowplot)
+
+
+source('scripts/color_palettes.R')
+
+
+
+```
+
+```{r}
+annot <- read_tsv('annotation/all_annotations.txt', col_names = c('acc', 'gene', 'tool', 'annot'))
+
+meta <- read_csv('tables/metadata.csv')
+
+
+all_gene_id_files <- list.files('annotation/gene_ids/', full.names = TRUE)
+
+all_gene_ids <- lapply(all_gene_id_files, function(x){
+  ids <- scan(x, what = 'character')
+  data.frame(gene = ids, genome = rep(basename(x), length(ids)), 
+             stringsAsFactors = FALSE) %>%
+    mutate(acc = case_when(
+      grepl('GCA_004303015', genome) ~ 'GCA_004303015.1',
+      grepl('GCA_011799845', genome) ~ 'GCA_011799845.1',
+      grepl('GCA', genome) ~ paste(strsplit(genome, split = "_")[[1]][c(1,2)], collapse = "_"),
+      grepl("SPDT00000000.1_genomic", genome) ~ "SPDT00000000",
+      grepl('LGSR', genome) ~ "LGSR00000000",
+      grepl('.fasta_gene_ids', genome) ~ sub(".all.maker.proteins.fasta_gene_ids", '', genome),
+      TRUE ~ genome
+    )) 
+}) %>% bind_rows() %>%
+  dplyr::select(-genome)
+
+
+orthog      <- read_tsv('tables/Orthogroups.tsv')
+load('rdata/orthologues_long.rdata')
+
+
+
+## join in the orthologues with singleton gene ids for each genome
+ortho_full  <- orthog_long %>% 
+  filter(!is.na(genes)) %>%
+  group_by(genome) %>%
+  mutate(acc = case_when(
+      grepl('GCA_004303015', genome) ~ 'GCA_004303015.1',
+      grepl('GCA_011799845', genome) ~ 'GCA_011799845.1',
+      grepl('GCA', genome) ~ paste(strsplit(genome, split = "_")[[1]][c(1,2)], collapse = "_"),
+      grepl("SPDT00000000.1_genomic", genome) ~ "SPDT00000000",
+      grepl('all.maker', genome) ~ sub(".all.maker.proteins", '', genome),
+      grepl('LGSR', genome) ~ "LGSR00000000",
+      TRUE ~ genome
+    )) %>%
+  ungroup() %>%
+  dplyr::rename('gene' = genes) %>%
+  full_join(all_gene_ids, ., by = c('acc', 'gene')) %>%
+  mutate(orthology_meta = ifelse(is.na(Orthogroup),
+                                 yes = gene,
+                                 no = Orthogroup)) %>%
+  left_join(., meta, by = 'acc') %>%
+  filter(!is.na(Agriculture)) %>%
+  group_by(Agriculture, orthology_meta) %>%
+  mutate(n_genomes = length(unique(acc))) %>%
+  mutate(n_copies_per_genome = length(acc)) %>%
+  ungroup()
+
+
+
+## compare the three pangenomes of the three clades
+
+groups <- unique(meta$Agriculture) %>% na.omit()
+
+ag <- c("Lower",
+         "Coral",
+         "Higher",
+         "Leafcutter")
+
+venn1 <- lapply(groups, function(x){
+  n_g = length(which(meta$Agriculture %in% x)) 
+  if(n_g > 4){
+    cutoff <- trunc(n_g *.95)
+  } else{
+    cutoff <- n_g  # must be in all of the genomes if there are less than 5 representatives
+  }
+  ortho_full %>% 
+    filter(Agriculture %in% x) %>%
+    filter(n_genomes >= cutoff)
+}) %>% bind_rows() %>%
+  dplyr::select(orthology_meta, clade_groups, Agriculture, n_genomes) %>%
+  distinct() %>%
+  group_by(clade_groups, Agriculture, orthology_meta) %>%
+  summarize(genome_count = sum(n_genomes)) %>%
+  ungroup()
+
+
+venn1 %>%
+  group_by(clade_groups) %>%
+  summarize(mean(genome_count))
+
+venn <- venn1
+remove(venn1)
+
+
+# venn <- lapply(ag, function(x){
+#   cutoff <- trunc(length(which(meta$Agriculture %in% x)) *.95)
+#   ortho_full %>% 
+#     filter(Agriculture %in% x) %>%
+#     group_by(orthology_meta) %>%
+#     mutate(n_genomes = length(unique(genus_species)))%>%
+#     ungroup() %>%
+#     filter(n_genomes >= cutoff)
+# }) %>% bind_rows() %>%
+#   select(orthology_meta, Agriculture, n_genomes) %>%
+#   distinct() %>%
+#   group_by(Agriculture, orthology_meta) %>%
+#   summarize(genome_count = sum(n_genomes)) %>%
+#   ungroup() %>%
+#   rename('clade_groups' = Agriculture) %>%
+#   bind_rows(., venn1)
+
+
+write_csv(venn, path = 'tables/clade_orthogroup_venn.csv')
+
+
+
+listInput <- lapply(c(groups), 
+                    function(x){
+                      venn %>% filter(Agriculture == x) %>% .$orthology_meta %>% unique()
+                    })
+
+names(listInput) <- c(groups)
+lapply(listInput, head)
+
+
+listInput[['AllOutgroup']] <- sort(unique(c(listInput$Trichoderma, listInput$Hypomyces_Cladobotryum)))
+listInput[['Escovopsis']] <- sort(unique(c(listInput$Coral, listInput$Higher, listInput$Leafcutter, listInput$Lower)))
+
+
+# listInput <- list('Escovopsis' = esco_set,, 
+#                   'Hypomyces/Cladobotryum' = ch_set,
+#                   'Trichoderma' = t_set)
+# set_name(listInput)
+
+lapply(listInput, head)
+
+pdf("plots/orthologues_upset_all.pdf", width = 15, height = 8)
+upset(fromList(listInput), order.by = "freq", 
+      sets = c('AllOutgroup', 'Lower','Coral','Higher','Leafcutter'),
+       point.size = 3.5, 
+       line.size = 1.5, 
+       text.scale = c(1.3, 1.3, 1, 1, 2, 0.75),
+       mb.ratio = c(0.8, 0.2))
+dev.off()
+
+#pdf("plots/orthologues_upset_subset.pdf", width = 8, height = 8)
+
+
+
+
+
+pdf("plots/orthologues_upset_clade.pdf", width = 15, height = 8)
+upset(fromList(listInput), order.by = "freq", 
+      sets = c('Hypomyces_Cladobotryum', 'Escovopsis', 'Trichoderma'),
+       point.size = 3.5, 
+       line.size = 1.5, 
+       text.scale = c(1.3, 1.3, 1, 1, 2, 0.75),
+       mb.ratio = c(0.8, 0.2))
+dev.off()
+ 
+
+ ## Keep this as it show a combination of the set size of esco, with the intersection size with the others
+set_data <- data.frame(
+  'Hypomyces_Cladobotryum' = length(listInput$`Hypomyces_Cladobotryum`),
+  Trichoderma = length(listInput$Trichoderma),
+  Escovopsis = length(listInput$Escovopsis),
+           Overlap = length(union(which(listInput$Escovopsis %in% listInput$`Hypomyces_Cladobotryum`), 
+                                      which(listInput$Escovopsis %in% listInput$Trichoderma)))) %>%
+  gather(set, n_genes)
+
+set_data$set <- factor(set_data$set, levels =rev(c('Trichoderma', 'Hypomyces_Cladobotryum', 'Escovopsis', 'Overlap')))
+
+ggplot(set_data, aes(y = n_genes, x = set, fill = set)) + 
+  geom_col() +
+  theme_classic() + 
+  scale_fill_manual(values = clade_colors) +
+  labs(y = '', 
+       x = '') +
+  geom_text(aes(y = n_genes +80, label = n_genes)) +
+  scale_y_continuous(expand = c(0,0), limits = c(0, max(set_data$n_genes)+200)) +
+  theme(axis.text.x = element_blank(), 
+        axis.ticks = element_blank(),
+        legend.justification=c(1,1),
+        ) +
+  ggsave('plots/esco_v_overlap_barchart.pdf', width = 4.5, height = 5)
+
+
+
+
+
+
+
+```
+
+
+```{r}
+###############
+## ADD in functional annotations to our shared orthogroups
+#################
+
+
+fais <- list.files('annotation/proteins/', pattern = 'fai', full.names = TRUE)
+aa_lengths <- lapply(fais, function(x){
+  read_tsv(x, col_names = c('gene', 'length', NA, NA, NA)) %>%
+    dplyr::select(-contains('X'))
+}) %>% bind_rows()
+# 
+# 
+groups = list(c('Higher', 'Leafcutter', 'Lower', 'AllOutgroup'),
+              c('Coral', 'Higher', 'Leafcutter', 'AllOutgroup'),
+              c('Lower','AllOutgroup'),
+              c('Coral', 'Higher', 'Lower', 'AllOutgroup'),
+              c('Higher', 'Leafcutter', 'AllOutgroup'),
+              c('Coral', 'Lower', 'AllOutgroup'),
+              c('Higher', 'Leafcutter'),
+              c('Leafcutter'),
+              c('Coral', 'Leafcutter', 'Lower', 'AllOutgroup'),
+              c('Coral', 'Higher', 'Leafcutter', 'Lower'),
+              c('Higher', 'Lower', 'AllOutgroup'),
+              c('Leafcutter', 'Lower', 'AllOutgroup'),
+              c('Lower'),
+              c('Leafcutter', 'AllOutgroup'),
+              c('Leafcutter', 'Lower', 'Higher'),
+              c('Higher', 'AllOutgroup'),
+              c('Coral', 'AllOutgroup'),
+              c('Higher'),
+              c('Coral', 'Leafcutter', 'Higher'),
+              c('Coral', 'Leafcutter', 'AllOutgroup'),
+              c('Coral', 'Higher', 'AllOutgroup'),
+              c('Lower', 'Higher'),
+              c('Lower', 'Leafcutter'),
+              c('Coral'),
+              c('Coral', 'Lower', 'Higher'),
+              c("Coral", 'Lower'),
+              c("Coral", 'Leafcutter'),
+              c("Coral", 'Lower', 'Leafcutter'),
+              c("Coral", 'Higher', 'Leafcutter')
+              )
+
+groups_sub = list(c('Higher', 'Leafcutter', 'Lower', 'AllOutgroup'),
+              c('Lower','AllOutgroup'),
+              c('Coral', 'Higher', 'Lower', 'AllOutgroup'),
+              c('Coral', 'Higher', 'Leafcutter', 'AllOutgroup'),
+              c('Coral', 'Leafcutter', 'Lower', 'AllOutgroup'),
+              c('Coral', 'Lower', 'AllOutgroup'),
+              c('Higher', 'Leafcutter', 'AllOutgroup'),
+              c('Leafcutter'),
+              c('Lower'),
+              c('Higher', 'Leafcutter'),
+              c('Higher', 'Lower', 'AllOutgroup'),
+              c('Coral', 'Higher', 'Leafcutter', 'Lower'),
+              c('Leafcutter', 'Lower', 'AllOutgroup'))
+
+groups <- lapply(groups, function(x){
+  paste(sort(x), collapse = ",")
+}) %>% unlist()
+
+
+
+input = listInput[c(ag, 'AllOutgroup')]
+elements <- unique(unlist(input))
+
+
+data <- unlist(lapply(input, function(x) {
+  x <- as.vector(match(elements, x))
+}))
+
+data[is.na(data)] <- as.integer(0)
+data[data != 0] <- as.integer(1)
+data <- data.frame(matrix(data, ncol = length(input), byrow = F))
+data <- data[which(rowSums(data) != 0), ]
+names(data) <- paste0("pa_", names(input))
+rownames(data) <- elements
+data$Orthogroup <- elements
+
+
+
+
+annot_add <- annot %>%
+   left_join(., ortho_full, by = 'gene') %>%
+   left_join(., aa_lengths, by = 'gene') %>%
+   left_join(data, ., by = c('Orthogroup')) %>%
+  filter(annot != '-', 
+         annot != 'N') %>%
+  distinct()
+  
+
+
+
+
+
+counts <- c()
+data <- data[, paste0("pa_", c(ag, 'AllOutgroup'))]
+cols <- colnames(data[, paste0('pa_', c(ag, 'AllOutgroup'))])
+
+
+for (x in rownames(data)) {
+  id = sort(cols[which(data[x, ] == 1)])
+  id = paste(id, collapse = ",") %>% gsub("pa_", "", .)
+  if(!id %in% names(counts)){
+    counts[id] = x
+  }  else {
+    counts[id] = paste(counts[id], x, sep = ",")
+  }
+}
+
+counts <- counts[groups]
+
+counts_df <- lapply(names(counts), function(x){
+  genes = strsplit(counts[x], split = ',')[[1]]
+  data.frame(group = rep(x, length(genes)), Orthogroup = genes)
+}) %>% bind_rows()
+
+
+
+
+orthogroup_meta <- annot_add %>% 
+  group_by(Orthogroup, tool) %>%
+  mutate(annot = strsplit(annot, split = ",")) %>%
+  unnest(annot) %>%
+  mutate(combined_annot = paste(unique(annot), collapse = ",")) %>%
+  ungroup()  %>%
+  group_by(Orthogroup) %>%
+  mutate(average_length = mean(length)) %>%
+  ungroup() %>%
+  dplyr::select(Orthogroup,
+         tool, 
+         combined_annot,
+         contains('pa_'),
+         average_length) %>%
+  distinct() %>%
+  left_join(., counts_df, by = 'Orthogroup') %>%
+  distinct()
+
+
+
+orthogroup_meta %>% select(Orthogroup, tool, combined_annot, contains('pa')) %>%
+  filter(tool %in% c('cazy', 'led', 'MEROPS')) %>% distinct() %>%
+  write_csv(path = 'tables/margaret_enzymes.csv')
+
+
+
+
+
+
+tools_interest <- c('CARD', 
+                    'cazy', 
+                    'led', 
+                    'MEROPS', 
+                    'virulence', 
+                    'antismash',
+                    'other')
+
+## make the full genome pie
+
+wg_pie <- orthogroup_meta %>% 
+  group_by(tool) %>%
+  mutate(tool_keep = case_when(
+    tool %in% c(tools_interest) ~ tool,
+    TRUE ~ 'other'
+  )) %>%
+  ungroup() %>%
+  mutate(annot_pa = 1)  %>%
+  dplyr::select(Orthogroup, annot_pa, tool_keep, group) %>%
+  distinct() %>%
+  group_by(Orthogroup) %>%
+  mutate(num_annots = sum(annot_pa)) %>%
+  ungroup() %>%
+  group_by(Orthogroup, tool_keep) %>%
+  mutate(annot_pa = ifelse(num_annots > 1 & tool_keep == 'other',
+                           yes = 0, 
+                           no = 1)) %>%
+  ungroup() %>%
+  spread(tool_keep, annot_pa) %>%
+  dplyr::rename('BGC' = antismash,
+         'Resistance' = CARD,
+         'CAZyme' = cazy,
+         'Lipase' = led,
+         'Peptidase' = MEROPS,
+         'Virulence' = virulence) %>%
+  select(-num_annots) %>%
+  mutate(group = ifelse(is.na(group), yes = 'core', no = 'accessory'))
+
+
+
+annot_colors <- c('BGC' = "#1B9E77",
+                  'Resistance' = "#D95F02",
+                  'CAZyme' = "#7570B3",
+                  'Lipase' = "#E7298A",
+                  'Peptidase' = "#66A61E",
+                  'Virulence' = "#E6AB02",
+                  'other' = "#A6761D")
+
+
+wg_ls <- lapply(colnames(wg_pie)[-c(1, 2)], function(x){
+  wg_pie[which(!is.na(wg_pie[[x]])), ] %>% 
+    .$Orthogroup %>%
+    unique()
+})
+
+names(wg_ls) <- colnames(wg_pie)[-c(1, 2)]
+
+
+wg_pie[is.na(wg_pie)] <- 0
+
+
+
+wg_pie %>%
+  gather(tool, annot, -Orthogroup, -group) %>%
+  mutate(all_counts = sum(annot)) %>%
+  group_by(group) %>%
+  mutate(all_counts_group = sum(annot)) %>%
+  group_by(tool, group) %>%
+  mutate(accessory = sum(annot)/all_counts_group)  %>%
+  ungroup() %>%
+  group_by(tool) %>%
+  mutate(full_genome = sum(annot)/all_counts) %>%
+  ungroup() %>% 
+  filter(group != 'core') %>%
+  select(accessory, full_genome, tool) %>%
+  distinct() %>%
+  gather(type, count, -tool) %>%
+  ggplot(aes(x = type, y = count, fill = tool)) +
+    geom_col() + 
+    scale_fill_manual(values = annot_colors) +
+    theme_classic() +
+    labs(y = 'Relative Proportion', x = '') +
+  ggsave('plots/upset_proportions.png', height = 3, width = 7)
+
+
+wg_pie_png_df <- wg_pie %>%
+  select(-group) %>%
+  gather(tool, annot, -Orthogroup) %>%
+  group_by(tool) %>%
+  summarize(count = sum(annot)) 
+wg_pie_png_df$count <- factor(wg_pie_png_df$count, sort(wg_pie_png_df$count))
+
+wg_pie_png <- wg_pie_png_df %>%
+  ggplot(aes(x = '', y = count, fill = tool)) +
+    geom_col() + 
+    coord_polar("y", start=0) +
+    scale_fill_manual(values = annot_colors) +
+    theme_classic() +
+    labs(y = '', x = '') +     
+  theme(
+          axis.line=element_blank(),
+          axis.text.x=element_blank(),
+          axis.text.y=element_blank(),
+          axis.ticks=element_blank(),
+          axis.title.x=element_blank(),
+          axis.title.y=element_blank(),
+          panel.background=element_blank(),
+          panel.border=element_blank(),
+          panel.grid.major=element_blank(),
+          panel.grid.minor=element_blank(),
+          plot.background=element_blank())
+  
+wg_pie_png + ggsave('plots/pies/wg_pie_annot.png')
+
+vp.BottomRight <- viewport(height=unit(.5, "npc"), width=unit(0.5, "npc"), 
+                           just=c("left","top"), 
+                           y=0.8, x=0.5)
+
+pdf("plots/supplementary_fig_wg_annot_interest.pdf", width = 15, height = 8)
+upset(fromList(wg_ls)[names(wg_ls)[-which(names(wg_ls) == 'other')]], nsets = 6, order.by = "freq", 
+        point.size = 3.5, 
+        line.size = 1.5, 
+        text.scale = c(1.3, 1.3, 1, 1, 2, 0.75),
+        mb.ratio = c(0.8, 0.2)) 
+print(wg_pie_png, vp=vp.BottomRight)
+dev.off()
+system('convert -density 300 plots/supplementary_fig_wg_annot_interest.pdf -resize 25% plots/supplementary_fig_wg_annot_interest.png')
+
+ortho_subset <- orthogroup_meta %>% 
+  filter(!is.na(group)) %>%
+  group_by(group, tool) %>%
+  mutate(tool_keep = case_when(
+    tool %in% c(tools_interest) ~ tool,
+    TRUE ~ 'other'
+  )) %>%
+  ungroup() %>%
+  dplyr::select(Orthogroup, tool_keep, group) %>%
+  distinct() %>%
+  mutate(annot_pa = 1)   %>%
+  group_by(Orthogroup) %>%
+  mutate(num_annots = sum(annot_pa)) %>%
+  ungroup() %>%
+  group_by(Orthogroup, tool_keep) %>%
+  mutate(annot_pa = ifelse(num_annots > 1 & tool_keep == 'other',
+                           yes = 0, 
+                           no = 1)) %>%
+  ungroup() %>%
+  select(-num_annots) %>%
+  spread(tool_keep, annot_pa) %>%
+  dplyr::rename('BGC' = antismash,
+         'Resistance' = CARD,
+         'CAZyme' = cazy,
+         'Lipase' = led,
+         'Peptidase' = MEROPS,
+         'Virulence' = virulence)
+  
+
+ortho_subset[is.na(ortho_subset)] <- 0
+  
+ortho_subset %>%
+  mutate(group = list(strsplit(group, split = ',')[[1]])) %>%
+  unnest_longer(group) %>%
+  write_csv('tables/orthogroup_group_functional_annotation.csv')
+
+
+
+subset_pie_df <- ortho_subset %>%
+  dplyr::select(-group) %>%
+  gather(tool, annot, -Orthogroup) %>%
+  group_by(tool) %>%
+  summarize(count = sum(annot)) 
+
+subset_pie_df$count <- factor(subset_pie_df$count, sort(subset_pie_df$count))
+
+subset_pi <- subset_pie_df %>% 
+  ggplot(aes(x = '', y = count, fill = tool)) +
+    geom_col() + 
+    coord_polar("y", start=0) +
+    scale_fill_manual(values = annot_colors) +
+    theme_classic() +
+    labs(y = '', x = '') +     
+  theme(
+          axis.line=element_blank(),
+          axis.text.x=element_blank(),
+          axis.text.y=element_blank(),
+          axis.ticks=element_blank(),
+          axis.title.x=element_blank(),
+          axis.title.y=element_blank(),
+          panel.background=element_blank(),
+          panel.border=element_blank(),
+          panel.grid.major=element_blank(),
+          panel.grid.minor=element_blank(),
+          plot.background=element_blank()) +
+  ggsave('plots/pies/subset_pie.png')
+
+subset_pi
+
+vp.BottomRight <- viewport(height=unit(.5, "npc"), width=unit(0.5, "npc"), 
+                           just=c("left","top"), 
+                           y=0.9, x=0.5)
+pdf("plots/orthologues_upset_subset.pdf", width = 8, height = 8)
+upset(fromList(listInput), order.by = "freq", 
+      sets = c('AllOutgroup', 'Lower','Coral','Higher','Leafcutter'),
+      intersections = list(
+        list('Lower','Higher','Leafcutter','AllOutgroup'),
+        list('Higher', "Leafcutter"),
+        list('Lower', 'AllOutgroup'),
+        list('Coral', 'Higher', 'Lower', 'AllOutgroup'),
+        list('Coral', 'Higher', 'Leafcutter', 'AllOutgroup'),
+        list('Coral', 'Lower', 'Leafcutter', 'AllOutgroup'),
+        list('Lower','Coral', 'AllOutgroup'),
+        list('Higher','Leafcutter','AllOutgroup'),
+        list('Leafcutter'),
+        list('Lower'),
+        list('Lower','Higher','AllOutgroup'),
+        list('Lower','Coral','Higher','Leafcutter'),
+        list('Lower','Leafcutter','AllOutgroup')
+      ),
+      point.size = 3.5, 
+      line.size = 1.5, 
+      text.scale = c(1.3, 1.3, 1, 1, 2, 0.75),
+      mb.ratio = c(0.8, 0.2),
+      keep.order = TRUE)
+  print(subset_pie, vp=vp.BottomRight)
+dev.off()
+
+
+legend_p <- ortho_subset %>% 
+    gather(annot, count, -Orthogroup, -group) %>%
+    filter(group == 'AllOutgroup,Higher,Leafcutter,Lower') %>%
+    group_by(group, annot) %>%
+    summarize(count_sum = sum(count)) %>% 
+    group_by(group) %>%
+    mutate(total_count = sum(count_sum)) %>%
+    group_by(group, annot) %>%
+    summarize(proportion = unique((count_sum/total_count)*100)) %>%
+    ggplot(aes(x = group, y = proportion, fill = annot)) +
+    geom_col() + 
+    scale_fill_manual(values = annot_colors) +
+    theme_classic()
+
+
+legend <- get_legend(
+  # create some space to the left of the legend
+  legend_p + theme(legend.box.margin = margin(0, 0, 0, 12))
+)
+
+
+
+
+
+# pie_plots <- lapply(groups_sub, function(x){
+#   group_s = paste(sort(x), collapse = ",")
+#   ortho_subset %>% 
+#     gather(annot, count, -Orthogroup, -group) %>%
+#     filter(group == group_s) %>%
+#     group_by(group, annot) %>%
+#     summarize(count_sum = sum(count)) %>% 
+#     group_by(group) %>%
+#     mutate(total_count = sum(count_sum)) %>%
+#     group_by(group, annot) %>%
+#     summarize(proportion = unique((count_sum/total_count)*100)) %>%
+#     ggplot(aes(x = group, y = proportion, fill = annot)) +
+#     geom_col() + 
+#     coord_polar("y", start=0) +
+#     scale_fill_manual(values = annot_colors) +
+#     theme_classic() +
+#     labs(y = '', title = '', x = '')  +
+#     theme(legend.position = 'none',
+#           axis.line=element_blank(),
+#           axis.text.x=element_blank(),
+#           axis.text.y=element_blank(),
+#           axis.ticks=element_blank(),
+#           axis.title.x=element_blank(),
+#           axis.title.y=element_blank(),
+#           panel.background=element_blank(),
+#           panel.border=element_blank(),
+#           panel.grid.major=element_blank(),
+#           panel.grid.minor=element_blank(),
+#           plot.background=element_blank(),
+#           plot.margin=unit(c(-14,-14,-9.5,-14), "mm")) +
+#     ggsave(filename = paste0("plots/pies/in_fig_", group_s, ".png"), width = 3, height = 3)
+#   
+# })
+
+pie_plots <- lapply(groups, function(x){
+  group_s = paste(sort(x), collapse = ",")
+  ortho_subset %>% 
+    gather(annot, count, -Orthogroup, -group) %>%
+    filter(group == group_s) %>%
+    group_by(group, annot) %>%
+    summarize(count_sum = sum(count)) %>% 
+    group_by(group) %>%
+    mutate(total_count = sum(count_sum)) %>%
+    group_by(group, annot) %>%
+    summarize(proportion = unique((count_sum/total_count)*100)) %>%
+    ggplot(aes(x = group, y = proportion, fill = annot)) +
+    geom_col() + 
+    coord_polar("y", start=0) +
+    scale_fill_manual(values = annot_colors) +
+    theme_classic() +
+    labs(y = '', title = group_s, x = '')  +
+    theme(legend.position = 'none',
+          axis.line=element_blank(),
+          axis.text.x=element_blank(),
+          axis.text.y=element_blank(),
+          axis.ticks=element_blank(),
+          axis.title.x=element_blank(),
+          axis.title.y=element_blank(),
+          panel.background=element_blank(),
+          panel.border=element_blank(),
+          panel.grid.major=element_blank(),
+          panel.grid.minor=element_blank(),
+          plot.background=element_blank())
+  
+})
+
+
+
+ortho_subset %>% 
+    gather(annot, count, -Orthogroup, -group) %>%
+    group_by(group, annot) %>%
+    summarize(count_sum = sum(count)) %>% 
+    group_by(group) %>%
+    mutate(total_count = sum(count_sum)) %>%
+    group_by(group, annot) %>%
+    summarize(proportion = unique((count_sum/total_count)*100)) %>%
+    ggplot(aes(x = group, y = proportion, fill = annot)) +
+    geom_col() + 
+    scale_fill_manual(values = annot_colors) +
+    theme_classic() +
+    labs(y = '', x = '') +
+  theme(axis.text.x = element_text(angle = 65, hjust = 1)) +
+  ggsave('plots/supplement_orthog_annotation_accessory.png')
+
+
+
+
+groups_sub <- lapply(groups_sub, function(x){paste(sort(x), collapse = ",")})
+
+# ortho_subset %>% 
+#     filter(group %in% groups_sub) %>%
+#     dplyr::select(-group) %>%
+#     gather(annot, count, -Orthogroup) %>%
+#     group_by(annot) %>%
+#     mutate(colsum_annot = sum(count)) %>%
+#     ungroup() %>%
+#     dplyr::select(annot, colsum_annot) %>%
+#     distinct() %>%
+#     ggplot(aes(x = '', y = colsum_annot, fill = annot)) +
+#     geom_col() + 
+#     coord_polar("y", start=0) +
+#     scale_fill_brewer(palette = 'Dark2') +
+#     theme_classic() +
+#     labs(y = '', x = '')  +
+#     theme(legend.position = 'none',
+#           axis.line=element_blank(),
+#           axis.text.x=element_blank(),
+#           axis.text.y=element_blank(),
+#           axis.ticks=element_blank(),
+#           axis.title.x=element_blank(),
+#           axis.title.y=element_blank(),
+#           panel.background=element_blank(),
+#           panel.border=element_blank(),
+#           panel.grid.major=element_blank(),
+#           panel.grid.minor=element_blank(),
+#           plot.background=element_blank()) + 
+#   ggsave('plots/all_pie.png')
+
+ggsave(legend, filename = 'plots/pies/pie_legend.pdf')
+pie_plots[[length(pie_plots)+1]] <- legend
+
+plot_grid(plotlist = pie_plots, label_size = 14, ncol = 2) + 
+  ggsave2(filename = 'plots/pies/pie_plots.png', height = 23, width = 10)# 
+
+
+
+
+# pca_data <- ortho_subset %>% 
+#   dplyr::select(-group) %>%
+#   distinct() %>%
+#   column_to_rownames(var = 'Orthogroup') %>%
+#   dplyr::select('CAZyme', 'Lipase', 'Peptidase')
+#          
+# 
+# pca_data <- pca_data[rowSums(pca_data) >0,]
+# 
+# #library(vegan)
+# pca_out    <- prcomp(pca_data)
+# eigs       <- pca_out$sdev^2
+# proportion <- (eigs/sum(eigs))*100
+# cumulative <- cumsum(eigs)/sum(eigs)
+# screeplot(pca_out)
+# n_k <- length(which(proportion >= 10))
+# 
+# ## nmds
+# example_NMDS=metaMDS(pca_data, k = n_k, binary = TRUE) # The number of reduced dimensions ## components with
+# #10% variance explained
+# 
+# 
+# 
+# stressplot(example_NMDS)
+# 
+# example_NMDS$converged
+# 
+# ## test for significance
+# c_dist <- vegdist(pca_data)
+# 
+# 
+# 
+# 
+# #ano_test <- anosim(c_dist, grouping = treat)
+# #summary(ano_test)
+# #plot(ano_test)
+# 
+# #
+# groups_names <- unique(ortho_subset$group)
+# groups_n <- seq(1, length(groups_names))
+# names(groups_n) = groups_names
+# 
+# 
+# pca <- data.frame(pca_out$x) %>%
+#   rownames_to_column( var = 'Orthogroup') %>%
+#   left_join(ortho_subset) %>%
+#   group_by(group) %>%
+#   mutate(group_n = groups_n[group]) %>%
+#   ungroup() %>%
+#   group_by(Orthogroup)
+#   
+# 
+# 
+# 
+# p <- ggord::ggord(pca_out, ellipse = FALSE, size = 2, color = 'black') +
+#   theme_classic() +
+#   scale_shape_manual('Groups', values = seq(1, 13)) 
+# 
+# p$layers[[1]] <- NULL
+# 
+# ## 76 unique combinations 
+# pca %>% dplyr::select(-Orthogroup, -contains('NMDS'), -group, -group_n) %>% 
+#   distinct() %>%
+#   nrow()
+# # 
+# # double_dig <- pca %>%
+# #   filter(group_n >= 10)
+# # single_dig <- pca %>%
+# #   filter(group_n < 10)
+# # 
+# # p + geom_text(data = single_dig, aes(x = PC1, y = PC2, group = group, label = group_n), size = 3, check_overlap = FALSE, nudge_x = 0.02) +
+# #   geom_text(data = double_dig, aes(x = PC1, y = PC2, group = group, label = group_n), size = 3, check_overlap = FALSE, nudge_x = -0.025) +
+# #   geom_point(alpha = 0.2)
+# 
+#   
+# #nmds_map <- nmds %>% dplyr::select(-contains('NMDS'), -Orthogroup)
+# 
+# # nmds %>% 
+# #   dplyr::select(-Orthogroup, -NMDS3, -NMDS4, -group, group_n) %>%
+# #   mutate_at(vars(contains('NMDS')), signif, digits = 2) %>%
+# #   dplyr::group_by(antismash, CARD, cazy, led, MEROPS, SignalP_EUK, virulence) %>%
+# #   mutate(group_nest = paste(unique(group_n), collapse = ',')) %>%
+# #   ungroup() %>%
+# #   dplyr::select(-group_n) %>%
+# #   distinct() %>%
+# #   data.frame() %>% 
+# #   head()
+#   #%>%
+# #  left_join(., nmds_map, by = c('antismash', 'CARD', 'cazy', 'led', 'MEROPS', 'SignalP_EUK', 'virulence'))
+#     
+# pca_regroup <- pca %>%
+#   mutate(group = ifelse(group %in% c('Lower', 'Leafcutter', 'Coral', 'Higher'), yes = group, no = 'other'))
+# 
+# p + geom_jitter(data = pca_regroup, alpha = 0.6, aes(x = PC1, y = PC2, colour = group, size = group_n), width = 0.3, height = 0.3) +
+#   scale_colour_manual(values = c(colors[c('Lower', 'Leafcutter', 'Coral', 'Higher')], 'other' = 'black')) +
+#   ggsave('plots/ordination_diverse_orthogroups_annotation.pdf', height = 5, width = 5)
+# 
+# p + geom_point(data = pca_regroup, alpha = 0.8, aes(x = PC1, y = PC2, size = group_n, colour = group)) +
+#   scale_colour_manual(values = c('Lower'= '#e6ab02', 'Leafcutter' = '#0069a3', 'other' = 'black'))
+# 
+# 
+# pca %>%
+#   dplyr::select(Orthogroup, group, group_n, contains('PC'), everything()) %>%
+#   write_csv(., 'tables/ordination_diverse_orthogroups_annotation_legend.csv')
+# 
+# 
+# # secreted <- ortho_subset %>%
+# #   rowwise() %>%
+# #   do(secreted = return_secreted(.)) %>% 
+# #   .$secreted %>% unlist()
+# #   
+# # 
+# # ortho_subset$secreted <- secreted
+# # 
+# # 
+# # ortho_subset <- ortho_subset %>%
+#  #  gather(tool, combined_annot, -OrthoGroup, -contains('pa_'), -group,)
+# 
+# # n_genes_data <- ortho_subset %>% select(OrthoGroup, group) %>%
+# #   group_by(group) %>%
+# #   summarize(n_genes = n_distinct(OrthoGroup)) %>%
+# #   mutate( y = 25)
+# 
+# 
+# 
+# # ortho_subset %>%
+# #   ggplot(.) +
+# #   geom_bar(stat = 'count', aes(x = group, fill = tool_keep)) +
+# #   scale_fill_brewer(palette = 'Dark2') +
+# #   theme_classic() + 
+# #   theme(axis.text.x = element_blank(),
+# #         axis.ticks.x = element_blank(),
+# #         legend.title = element_blank(),
+# #         legend.position = c(.9,.6))  +
+# #   scale_y_continuous(expand = c(0,0)) +
+# #   labs(y = '', x = '') +
+# #   ggsave('plots/orthologues_upset_subset_function_annot.pdf', width = 4, height = 5)
+# 
+# ## grab LED, merops, cazy, secreted, signalp, virulence, tmhmm
+# 
+# 
+# 
+
+
+```
+
+
+
+```{r groupEnrichment, eval = FALSE}
+library(topGO)
+## nothing gets enriched here
+go_annot <- annot_add %>% filter(tool == 'GO') %>%  
+  dplyr::select(Orthogroup,
+         annot,
+         contains('pa_'), Agriculture) %>% 
+  group_by(Orthogroup) %>%
+  mutate(AllAgs = paste(sort(unique(Agriculture)), collapse = ',')) %>%
+  ungroup() %>%
+  dplyr::select(-Agriculture) %>%
+  distinct() %>%
+  gather(agric, val, -Orthogroup, -annot, -AllAgs) %>%
+  dplyr::select(-agric) %>%
+  group_by(Orthogroup) %>%
+  mutate(go = paste(unique(strsplit(annot, ",")[[1]]), collapse = ",")) %>%
+  ungroup() %>%
+  dplyr::select(-annot) %>%
+  distinct()
+
+go_annot_u      <- go_annot %>% dplyr::select(go, Orthogroup) %>% distinct()
+ortho2go        <- go_annot_u$go
+names(ortho2go) <- go_annot_u$Orthogroup
+
+
+ortho2go        <- lapply(ortho2go, function(x){strsplit(x, ',')[[1]]})
+geneNames        <- names(ortho2go)
+
+
+
+groups = list(c('Higher', 'Leafcutter', 'Lower', 'AllOutgroup'),
+              c('Lower','AllOutgroup'),
+              c('Coral', 'Higher', 'Lower', 'AllOutgroup'),
+              c('Coral', 'Higher', 'Leafcutter', 'AllOutgroup'),
+              c('Coral', 'Leafcutter', 'Lower', 'AllOutgroup'),
+              c('Coral', 'Lower', 'AllOutgroup'),
+              c('Higher', 'Leafcutter', 'AllOutgroup'),
+              c('Leafcutter'),
+              c('Lower'),
+              c('Higher', 'Leafcutter'),
+              c('Higher', 'Lower', 'AllOutgroup'),
+              c('Coral', 'Higher', 'Leafcutter', 'Lower'),
+              c('Leafcutter', 'Lower', 'AllOutgroup'))
+
+groups <- lapply(groups, function(x){
+  paste(sort(x), collapse = ",")
+}) %>% unlist()
+
+
+colnames(data) <- sub('pa_', '', colnames(data))
+counts <- c()
+data <- data[, c(ag, 'AllOutgroup')]
+cols <- colnames(data[, c(ag, 'AllOutgroup')]) 
+
+
+for (x in rownames(data)) {
+  id = sort(cols[which(data[x, ] == 1)])
+  id = paste(id, collapse = ",")
+  if(!id %in% names(counts)){
+    counts[id] = x
+  }  else {
+    counts[id] = paste(counts[id], x, sep = ",")
+  }
+}
+
+xx <- as.list(GOTERM)
+
+library(topGO)
+go_enrich <- lapply(groups, function(x){
+  ## define the genes that I'm interested in (those not in fungus farming ant escovopsis)
+  myInterestingGenes <- strsplit(counts[x], split = ",")[[1]]
+  geneList           <- factor(as.integer(geneNames %in% myInterestingGenes))
+  names(geneList)    <- geneNames
+  
+  
+  ## perform an enrichment test on the genes that are not in FFA
+  enrich <- lapply(c('BP', 'MF', 'CC'), function(x){
+    GOdata <- new("topGOdata", ontology = x, allGenes = geneList,
+                  annot = annFUN.gene2GO, gene2GO = ortho2go)
+    test.stat <- new("classicCount", 
+                     testStatistic = GOFisherTest, 
+                     name = "Fisher test")
+    resultFisher         <- getSigGroups(GOdata, test.stat)
+    pVal                 <- data.frame(pval=signif(score(resultFisher), 6),BH.correction=seq(1, length(score(resultFisher))))
+    pVal                 <- pVal[order(pVal$pval),]
+    pVal$BH.correction   <- signif(p.adjust(pVal$pval, method="BH"), 6)
+    pVal.sub             <- pVal[pVal$BH.correction<0.01,]
+    pVal.sub$go_id       <- rownames(pVal.sub)
+    pVal.try <- cbind(pVal.sub, Term=sapply(pVal.sub$go_id, FUN=function(n){Term(xx[[n]])}), Ontol=sapply(pVal.sub$go_id, FUN=function(n){Ontology(xx[[n]])}))
+    
+    if (nrow(pVal.try) >0){
+      df2                  <- pVal.try[,c("go_id", "Term", "Ontol", "pval", "BH.correction")]
+      out <- list(df2, GO, resultFisher)
+      invisible(out)
+    } else {
+      message("No enrichment")
+    }
+  })
+})
+
+
+  
+### KEGG enrichment test
+
+
+
+# path <- keggList("pathway")
+# head(path)
+# 
+# ko_to_path <- keggLink("ko", 'pathway')
+# ko_path_df <- data.frame(KO = ko_to_path, path_id = names(ko_to_path))
+# 
+# 
+# 
+# keggframeData = distinct(data.frame(kegg = sub('ko:K', '', annot$KO), gene = annot$OrthoGroup, 
+#                          stringsAsFactors = FALSE))
+# head(keggframeData)
+# keggFrame=KEGGFrame(keggframeData, organism = 'Escovopsis')
+# 
+# gsc <- GeneSetCollection(keggFrame, setType = KEGGCollection())
+# 
+# universe = unique(keggframeData$gene)
+# 
+# 
+# genes = orthogroup_meta %>% filter(group == 'Leafcutter') %>% .$OrthoGroup
+# 
+# kparams <- GSEAKEGGHyperGParams(name="My Custom GSEA based annot Params",
+#                                   geneSetCollection=gsc,
+#                                   geneIds = genes,
+#                                   universeGeneIds = universe,
+#                                   pvalueCutoff = 0.05,
+#                                   testDirection = "over")
+# kOver <- hyperGTest(kparams)
+# 
+# results <- summary(kOver) %>%
+#   data.frame() %>%
+#   mutate(BH.correction = signif(p.adjust(Pvalue,method="BH"), 6))  %>%
+#   mutate(KO = paste0('ko:K', KEGGID)) %>%
+#   left_join(., ko_path_df, 'KO') %>%
+#   mutate(path_def = path[path_id]) %>%
+#   filter(!is.na(path_def),
+#          BH.correction <= 0.05)
+#    
+# head(arrange(results, Pvalue), 50) %>% .$path_def
+
+# venn.diagram(
+#   x = list('Escovopsis' = esco_set, 'Hypomyces/Cladobotryum' = ch_set, 'Trichoderma' = t_set),
+#   height = 3000,
+#   width = 3000,
+#    category.names = c(paste0("Escovopsis\n(", n_distinct(esco_set), " Orthologues across ", nrow(filter(meta, clade_groups == 'Escovopsis')), " genomes)"),
+#                       paste0("Cladobotryum_Hypomyces\n(", n_distinct(ch_set), " Orthogroups across ", nrow(filter(meta, clade_groups == 'Hypomyces/Cladobotryum')), " genomes)"), 
+#                       paste0("Trichoderma\n(", n_distinct(t_set), " Orthogroups across ", nrow(filter(meta, clade_groups == 'Trichoderma')), " genomes)")),
+#   filename = 'plots/shared_genes_venn_diagramm.png',
+#   resolution = 300,
+#   # Numbers
+#   fontface = "bold",
+#   fontfamily = "sans",
+#   main.fontface = 'bold',
+#   main.fontfamily = 'sans',
+#   # Set names
+#   cat.fontface = "bold",
+#   cat.default.pos = "outer",
+#   cat.pos = c(-27, 27, 135),
+#   cat.dist = c(0.055, 0.055, 0.085),
+#   cat.fontfamily = "sans",
+#   rotation = 1
+# )
+
+
+
+# ortho_annot <- ortho_full %>%
+#   mutate(cazy = ifelse(gene %in% cazy,
+#                        yes = 'cazy',
+#                        no = NA)) %>%
+#   mutate(card = ifelse(gene %in% card,
+#                        yes = 'card',
+#                        no = NA)) %>%
+#   select(-gene, -genome) %>%
+#   filter(!is.na(cazy) | !is.na(card)) %>%
+#   group_by(OrthoGroup) %>%
+#   mutate(annotation = paste(na.omit(c(unique(cazy), unique(card))), collapse = "_")) %>%
+#   ungroup()  %>%
+#   select(-cazy, -card) %>%
+#   distinct() %>%
+#   data.frame(., stringsAsFactors = FALSE)
+#   
+# 
+# 
+# 
+# 
+# 
+# rownames(ortho_full) <- ortho_full$OrthoGroup
+# ortho_full$OrthoGroup <- NULL
+# 
+# 
+# ortho <- read_csv('annotation/fastortho/orthologues_presence_absence.csv')
+# ortho_mat <- data.frame(ortho, stringsAsFactors = FALSE)
+# rownames(ortho_mat) <- ortho$OrthoGroup
+# ortho_mat$OrthoGroup <- NULL
+# ortho_mat <- as.matrix(ortho_mat)
+# 
+# 
+# ortho_mat[ortho_mat > 1] <- 1
+# 
+# 
+# breaks = seq(0, 1)
+# 
+# #colors_f <- colorRampPalette(colors = c('white', 'black'))
+# colors <- c('white', 'black')
+# 
+# 
+# annot_colors <- list(annotation = c('card' =  "#1B9E77", 'cazy' = "#D95F02", "cazy_card" = "#7570B3"))
+# 
+# pheatmap(ortho_mat, show_rownames = FALSE, color = colors, cellwidth = 10, annotation_row = ortho_full, annotation_colors = annot_colors, 
+#          annotation_names_row = FALSE, filename = 'plots/orthologous_gene_matrix.pdf')
+# 
+# 
+```
+
+```{r lostEnrichment}
+
+
+
+library(topGO)
+
+metadata <- read_csv('tables/metadata.csv') %>% 
+  filter(!is.na(genome_id))
+
+
+## load('rdata/orthologues_long.rdata')
+
+# all_ortho <- orthog_long %>% 
+#   dplyr::rename('gene' = genes) %>%
+#   filter(genome != "GCA_000225605.1_CmilitarisCM01_v01_protein", !is.na(gene)) %>%
+#   mutate(genome = sub('\\..*$', '', genome))
+# rm(orthog_long)
+
+uniq_genomes = unique(ortho_full$genome_id) %>% na.omit()
+id_map         <- sapply(unique(annot$acc), grep, x = uniq_genomes, value = TRUE)
+
+id_map1        <- names(id_map)
+names(id_map1) <- id_map
+
+
+## make sure all of the genomes are in the annotation (will fail if not)
+lapply(uniq_genomes, function(x){
+  print(x)
+  id_map1[[x]]
+})
+
+
+
+all_ortho <- ortho_full %>%
+  rowwise() %>%
+  mutate(genome = id_map1[[genome_id]]) %>%
+  group_by(genome) %>%
+  mutate(acc = grep(genome, metadata$acc, value = TRUE)) %>%
+  ungroup()#%>%
+  # left_join(., metadata, by = 'acc')
+
+
+joined_ortho <- all_ortho %>%
+  left_join(annot, by = c('acc', 'gene'))
+
+
+#dplyr::filter(joined_ortho, tool %in% c('LED', 'MEROPS', 'cazy'), ffa_count == 0) %>% 
+#  .$ortho %>% unique() 
+  
+
+annot_sum <- joined_ortho %>%
+  filter(tool == 'GO') 
+
+annot_sum$Orthogroup %>% n_distinct()
+
+all_out_t <- unique(c(listInput$`Hypomyces_Cladobotryum`, listInput$Trichoderma))
+
+no_out <- listInput$Escovopsis[which(!listInput$Escovopsis %in% all_out_t)]
+
+
+length(no_out) ## only escovopsis 404
+
+
+not_ffa <- all_out_t[which(!all_out_t %in% listInput$Escovopsis)]
+length(not_ffa) ## lost in escovopsis 1507
+protein_l_f <- list.files('annotation/proteins', pattern = 'fai', full.names = TRUE)
+
+
+
+
+
+
+
+
+p_lengths <- lapply(protein_l_f, function(x){
+  genome = basename(x) %>%
+    sub(".fai", "", .) %>%
+    sub(".faa", "", .) %>%
+    sub(".fasta", "", .)
+  read_tsv(x, col_names = c('gene', 'length', 'X', 'X2')) %>%
+    dplyr::select(-contains('X')) %>%
+    mutate(genome = genome)
+}) %>% bind_rows() %>%
+  left_join(., ortho_full, by = c('genome', 'gene'))
+
+## 309 genes lost in 95% esco are in at least one genomes
+p_lengths %>% filter(Orthogroup %in% not_ffa) %>% 
+  dplyr::select(Orthogroup, length, acc, clade_groups) %>%
+  mutate(cds_length = length*3) %>%
+  group_by(Orthogroup, clade_groups) %>%
+  summarize(cds_len = mean(cds_length), length(unique(acc))) %>%
+  group_by(clade_groups) %>%
+  summarize(cds_sum = sum(cds_len), num_genes = length(unique(Orthogroup))) %>%
+  filter(clade_groups != 'Escovopsis') %>%
+  ggplot(aes(y = cds_sum, x = clade_groups, fill = clade_groups)) + 
+  geom_col() +
+  theme_classic() + 
+  scale_fill_manual(values = clade_colors) +
+  labs(y = 'CDS Length Lost (bp)', 
+       x = '') +
+  geom_text(aes(y = cds_sum +80, label = num_genes)) +
+  scale_y_continuous(expand = c(0,0), limits =  c(0, 2300000)) +
+  theme(axis.text.x = element_blank(), 
+        axis.ticks = element_blank(),
+        legend.position = 'none',
+        ) +
+  ggsave('plots/esco_reduced_genes_length_barchart.pdf', width = 5, height = 7)
+  
+  
+
+
+
+
+
+ortho2go_df <- annot_sum %>% 
+  dplyr::select(Orthogroup, annot) %>%
+  group_by(Orthogroup) %>%
+  mutate(all_go = paste(unique(annot), collapse = ",")) %>%
+  dplyr::select(-annot) %>%
+  distinct() #%>%
+  #mutate(all_go = paste(unique(strsplit(all_go, ",")[[1]]), collapse = ","))
+
+
+ortho2go        <- ortho2go_df$all_go
+names(ortho2go) <- ortho2go_df$Orthogroup
+
+ortho2go <- lapply(ortho2go, function(x){strsplit(x, ',')[[1]]})
+
+geneNames <- names(ortho2go)
+head(geneNames)
+
+
+
+## define the genes that I'm interested in (those not in fungus farming ant escovopsis)
+myInterestingGenes <- not_ffa
+geneList           <- factor(as.integer(geneNames %in% myInterestingGenes))
+names(geneList)    <- geneNames
+
+
+
+## perform an enrichment test on the genes that are not in FFA
+enrich <- lapply(c('BP', 'MF', 'CC'), function(x){
+  GOdata <- new("topGOdata", ontology = x, allGenes = geneList,
+                annot = annFUN.gene2GO, gene2GO = ortho2go)
+  test.stat <- new("classicCount", 
+                   testStatistic = GOFisherTest, 
+                   name = "Fisher test")
+  resultFisher         <- getSigGroups(GOdata, test.stat)
+  pVal                 <- data.frame(pval=signif(score(resultFisher), 6),BH.correction=seq(1, length(score(resultFisher))))
+  pVal                 <- pVal[order(pVal$pval),]
+  pVal$BH.correction   <- signif(p.adjust(pVal$pval, method="BH"), 6)
+  pVal.sub             <- pVal[pVal$BH.correction<0.01,]
+  pVal.sub$go_id       <- rownames(pVal.sub)
+  pVal.try <- cbind(pVal.sub, Term=sapply(pVal.sub$go_id, FUN=function(n){Term(xx[[n]])}), Ontol=sapply(pVal.sub$go_id, FUN=function(n){Ontology(xx[[n]])}))
+  
+  if (nrow(pVal.try) >0){
+    df2                  <- pVal.try[,c("go_id", "Term", "Ontol", "pval", "BH.correction")]
+    out <- list(df2, GO, resultFisher)
+    invisible(out)
+  } else {
+    message("No enrichment")
+  }
+})
+
+
+
+all_enrich_df <- bind_rows(enrich[[1]][1], enrich[[2]][1], enrich[[3]][1])
+all_enrich_df %>% dplyr::select(go_id, BH.correction, everything()) %>% write_tsv('tables/ffa_reduction_GO.tsv')
+
+
+#printGraph(GOdata, resultFisher, firstSigNodes = nrow(df2), fn.prefix = "tGO", useInfo = "all", pdfSW = TRUE)
+#View(df2)
+
+
+# A plotting R script produced by the REVIGO server at http://revigo.irb.hr/
+# If you found REVIGO useful in your work, please cite the following reference:
+# Supek F et al. "REVIGO summarizes and visualizes long lists of Gene Ontology
+# terms" PLoS ONE 2011. doi:10.1371/journal.pone.0021800
+
+
+# --------------------------------------------------------------------------
+# If you don't have the ggplot2 package installed, uncomment the following line:
+# install.packages( "ggplot2" );
+library( ggplot2 );
+# --------------------------------------------------------------------------
+# If you don't have the scales package installed, uncomment the following line:
+# install.packages( "scales" );
+library( scales );
+
+
+# --------------------------------------------------------------------------
+# Here is your data from REVIGO. Scroll down for plot configuration options.
+
+revigo.names <- c("term_ID","description","frequency_%","plot_X","plot_Y","plot_size","log10_p_value","uniqueness","dispensability");
+revigo.data <- rbind(c("GO:0055085","transmembrane transport", 8.916, 3.666,-4.349, 6.058,-5.4380,0.911,0.000),
+c("GO:0055114","oxidation-reduction process",15.060, 3.738, 4.661, 6.286,-5.5691,0.856,0.000),
+c("GO:0006355","regulation of transcription, DNA-templated", 9.917,-5.131, 0.292, 6.105,-5.5691,0.043,0.033),
+c("GO:0019222","regulation of metabolic process",11.942,-5.010,-3.221, 6.185,-3.9162,0.273,0.597),
+c("GO:0034654","nucleobase-containing compound biosynthetic process",14.533,-4.979, 3.592, 6.271,-2.1301,0.334,0.695));
+
+one.data <- data.frame(revigo.data);
+names(one.data) <- revigo.names;
+one.data <- one.data [(one.data$plot_X != "null" & one.data$plot_Y != "null"), ];
+one.data$plot_X <- as.numeric( as.character(one.data$plot_X) );
+one.data$plot_Y <- as.numeric( as.character(one.data$plot_Y) );
+one.data$plot_size <- as.numeric( as.character(one.data$plot_size) );
+one.data$log10_p_value <- as.numeric( as.character(one.data$log10_p_value) );
+one.data$frequency <- as.numeric( as.character(one.data$frequency) );
+one.data$uniqueness <- as.numeric( as.character(one.data$uniqueness) );
+one.data$dispensability <- as.numeric( as.character(one.data$dispensability) );
+#head(one.data);
+
+
+# --------------------------------------------------------------------------
+# Names of the axes, sizes of the numbers and letters, names of the columns,
+# etc. can be changed below
+
+p1 <- ggplot( data = one.data );
+p1 <- p1 + geom_point( aes( plot_X, plot_Y, colour = log10_p_value, size = plot_size), alpha = I(0.6) ) + scale_size_area();
+p1 <- p1 + scale_colour_gradientn( colours = c("blue", "green", "yellow", "red"), limits = c( min(one.data$log10_p_value), 0) );
+p1 <- p1 + geom_point( aes(plot_X, plot_Y, size = plot_size), shape = 21, fill = "transparent", colour = I (alpha ("black", 0.6) )) + scale_size_area();
+p1 <- p1 + scale_size( range=c(5, 30)) + theme_bw(); # + scale_fill_gradientn(colours = heat_hcl(7), limits = c(-300, 0) );
+p1 <- p1 + geom_text(aes(plot_X, plot_Y, label = description), colour = I(alpha("black", 0.85)), size = 3 );
+p1 <- p1 + labs (y = "semantic space x", x = "semantic space y");
+p1 <- p1 + theme(legend.key = element_blank()) ;
+one.x_range = max(one.data$plot_X) - min(one.data$plot_X);
+one.y_range = max(one.data$plot_Y) - min(one.data$plot_Y);
+p1 <- p1 + xlim(min(one.data$plot_X)-one.x_range/10,max(one.data$plot_X)+one.x_range/10);
+p1 <- p1 + ylim(min(one.data$plot_Y)-one.y_range/10,max(one.data$plot_Y)+one.y_range/10);
+
+
+
+# --------------------------------------------------------------------------
+# Output the plot to screen
+
+p1 + ggsave('plots/reduced_all_revigo.pdf', width = 10, height = 7)
+
+
+
+# Uncomment the line below to also save the plot to a file.
+# The file type depends on the extension (default=pdf).
+
+
+enriched_leaves <- all_enrich_df %>%
+  filter(go_id %in% revigo.data[,1])
+
+
+reduced_in <- ortho2go_df %>% filter(Orthogroup %in% myInterestingGenes) %>%
+  mutate(all_go = strsplit(all_go, ',')) %>%
+  unnest(all_go) %>%
+  dplyr::rename('go_id' = all_go) %>%
+  right_join(., enriched_leaves, by = 'go_id') %>%
+  left_join(., all_ortho, by = 'Orthogroup') %>%
+  group_by(go_id, clade_groups) %>%
+  mutate(num_ortho = case_when(
+    clade_groups == 'Trichoderma' ~ (length(Orthogroup)/nrow(filter(metadata, genus == 'Trichoderma'))),
+    clade_groups == 'Hypomyces_Cladobotryum' ~ (length(Orthogroup)/nrow(filter(metadata, clade_groups == 'Hypomyces_Cladobotryum')))
+  )) %>%
+  mutate(ortho_pass = ifelse(num_ortho >= 10, TRUE, FALSE)) %>%
+  distinct() %>%
+  filter(any(ortho_pass)) %>% 
+  dplyr::select(go_id, clade_groups, Term, Ontol, BH.correction, num_ortho) %>% 
+  distinct() %>%
+  ungroup() %>%
+  filter(Ontol != 'CC') %>%
+  mutate(Ontol = case_when(
+    Ontol == 'MF' ~ 'Molecular Function',
+    Ontol == 'BP' ~ 'Biological Process'
+  )) %>%
+  mutate(Term_s = case_when(
+    Term == "oxidoreductase activity, acting on paired donors, with incorporation or reduction of molecular oxygen" ~ "oxidoreductase activity",
+    Term == "DNA-binding transcription factor activity, RNA polymerase II-specific" ~ "DNA-binding transcription factor activity",
+    TRUE ~ Term
+  )) %>%
+  mutate(pval_s = case_when(
+    BH.correction <= 0.0001  ~ "****",
+    BH.correction <= 0.001 ~ "***",
+    BH.correction <= 0.01 ~ "**",
+    BH.correction <= 0.5 ~ "*",
+    TRUE ~ "NA"
+  ))
+
+pvals <- reduced_in %>% filter(clade_groups == 'Trichoderma') %>%
+  dplyr::select(-clade_groups) %>% distinct()
+
+reduced_in$Term_s = factor(reduced_in$Term_s,
+                         levels = unique(arrange(reduced_in, num_ortho)$Term_s))
+
+write_csv(reduced_in, path = 'tables/reduced_go_terms.csv')
+
+fig <- reduced_in %>%
+  ggplot(aes(x = Term_s, y = num_ortho)) +
+  geom_col(position = 'dodge', aes(fill = clade_groups)) +
+  theme_classic() +
+  xlab('GO Term') +
+  coord_flip() +
+  ylab('Average Number of OrthoGroups') +
+  ggtitle('GO term Enrichment of Orthogroups Lost in Escovopsis') +
+  geom_text(data = pvals, aes(y = num_ortho + 20, x = Term_s, label = pval_s, angle = 90), size = 2.5) +
+  scale_y_continuous(expand = c(0,0), limits = c(0, max(reduced_in$num_ortho)+40),
+                     breaks = seq(0, max(reduced_in$num_ortho)+40, by = 50),
+                     labels = seq(0, max(reduced_in$num_ortho)+40, by = 50)
+                     ) +
+  theme(#axis.title.y = element_text(margin=margin(0,-10,0,0)),
+        #axis.text.y = element_text(margin = margin(0,-20,0,0)),
+    text = element_text(size=20),
+    panel.border = element_rect(colour = '#000000', fill = NA, size = 1),
+    legend.title = element_blank(),
+    legend.position = "none")   +
+  scale_fill_manual(values = clade_colors)
+fig
+
+fig + ggsave('plots/reduction_GO_enrich.pdf', width = 15)
+
+
+
+
+
+```
+
+```{r lostEnrichment-clade-group}
+
+input = listInput[c('Trichoderma', 'Escovopsis', 'Hypomyces_Cladobotryum')]
+elements <- unique(unlist(input))
+
+
+data <- unlist(lapply(input, function(x) {
+  x <- as.vector(match(elements, x))
+}))
+
+data[is.na(data)] <- as.integer(0)
+data[data != 0] <- as.integer(1)
+data <- data.frame(matrix(data, ncol = length(input), byrow = F))
+data <- data[which(rowSums(data) != 0), ]
+names(data) <- paste0("pa_", names(input))
+rownames(data) <- elements
+data$Orthogroup <- elements
+
+
+
+groups = list(c('Hypomyces_Cladobotryum'),
+              c('Trichoderma','Hypomyces_Cladobotryum'),
+              c('Trichoderma'),
+              c('Escovopsis','Hypomyces_Cladobotryum'),
+              c('Trichoderma','Escovopsis'),
+              c('Escovopsis'))
+
+groups <- lapply(groups, function(x){
+  paste(sort(x), collapse = ",")
+}) %>% unlist()
+
+
+colnames(data) <- sub('pa_', '', colnames(data))
+counts <- c()
+data <- data[, c('Trichoderma', 'Escovopsis', 'Hypomyces_Cladobotryum')]
+cols <- colnames(data[, c('Trichoderma', 'Escovopsis', 'Hypomyces_Cladobotryum')]) 
+
+
+for (x in rownames(data)) {
+  id = sort(cols[which(data[x, ] == 1)])
+  id = paste(id, collapse = ",")
+  if(!id %in% names(counts)){
+    counts[id] = x
+  }  else {
+    counts[id] = paste(counts[id], x, sep = ",")
+  }
+}
+
+#xx <- as.list(GOTERM)
+#library(topGO)
+go_enrich <- lapply(groups, function(y){
+  ## define the genes that I'm interested in (those not in fungus farming ant escovopsis)
+  myInterestingGenes <- strsplit(counts[y], split = ",")[[1]]
+  geneList           <- factor(as.integer(geneNames %in% myInterestingGenes))
+  names(geneList)    <- geneNames
+  
+  
+  ## perform an enrichment test on the genes that are not in FFA
+  enrich <- lapply(c('BP', 'MF', 'CC'), function(x){
+    GOdata <- new("topGOdata", ontology = x, allGenes = geneList,
+                  annot = annFUN.gene2GO, gene2GO = ortho2go)
+    test.stat <- new("classicCount", 
+                     testStatistic = GOFisherTest, 
+                     name = "Fisher test")
+    resultFisher         <- getSigGroups(GOdata, test.stat)
+    pVal                 <- data.frame(pval=signif(score(resultFisher), 6),BH.correction=seq(1, length(score(resultFisher))))
+    pVal                 <- pVal[order(pVal$pval),]
+    pVal$BH.correction   <- signif(p.adjust(pVal$pval, method="BH"), 6)
+    pVal.sub             <- pVal[pVal$BH.correction<0.01,]
+    pVal.sub$go_id       <- rownames(pVal.sub)
+    pVal.try <- cbind(pVal.sub, Term=sapply(pVal.sub$go_id, FUN=function(n){Term(xx[[n]])}), Ontol=sapply(pVal.sub$go_id, FUN=function(n){Ontology(xx[[n]])}))
+    
+    if (nrow(pVal.try) >0){
+      df2                  <- pVal.try[,c("go_id", "Term", "Ontol", "pval", "BH.correction")]
+      df2$group           <- y
+      #out <- list(df2, GO, resultFisher)
+      invisible(df2)
+    } else {
+      message("No enrichment")
+    }
+  })
+})
+
+all_enrich_df <- lapply(go_enrich, function(x){x[[1]]}) %>% bind_rows()
+
+## from revigo analysis
+
+
+
+
+# A plotting R script produced by the REVIGO server at http://revigo.irb.hr/
+# If you found REVIGO useful in your work, please cite the following reference:
+# Supek F et al. "REVIGO summarizes and visualizes long lists of Gene Ontology
+# terms" PLoS ONE 2011. doi:10.1371/journal.pone.0021800
+
+
+# --------------------------------------------------------------------------
+# If you don't have the ggplot2 package installed, uncomment the following line:
+# install.packages( "ggplot2" );
+library( ggplot2 );
+# --------------------------------------------------------------------------
+# If you don't have the scales package installed, uncomment the following line:
+# install.packages( "scales" );
+library( scales );
+
+
+# --------------------------------------------------------------------------
+# Here is your data from REVIGO. Scroll down for plot configuration options.
+
+revigo.names <- c("term_ID","description","frequency_%","plot_X","plot_Y","plot_size","log10_p_value","uniqueness","dispensability");
+revigo.data <- rbind(c("GO:0006355","regulation of transcription, DNA-templated", 9.917, 4.948, 0.835, 6.105,-3.8482,0.025,0.000),
+c("GO:0055085","transmembrane transport", 8.916,-5.018, 0.003, 6.058,-2.4258,0.901,0.000),
+c("GO:0019222","regulation of metabolic process",11.942, 4.947,-0.841, 6.185,-3.2151,0.224,0.597));
+
+one.data <- data.frame(revigo.data);
+names(one.data) <- revigo.names;
+one.data <- one.data [(one.data$plot_X != "null" & one.data$plot_Y != "null"), ];
+one.data$plot_X <- as.numeric( as.character(one.data$plot_X) );
+one.data$plot_Y <- as.numeric( as.character(one.data$plot_Y) );
+one.data$plot_size <- as.numeric( as.character(one.data$plot_size) )/2;
+one.data$log10_p_value <- as.numeric( as.character(one.data$log10_p_value) );
+one.data$frequency <- as.numeric( as.character(one.data$frequency) );
+one.data$uniqueness <- as.numeric( as.character(one.data$uniqueness) );
+one.data$dispensability <- as.numeric( as.character(one.data$dispensability) );
+#head(one.data);
+
+
+# --------------------------------------------------------------------------
+# Names of the axes, sizes of the numbers and letters, names of the columns,
+# etc. can be changed below
+
+p1 <- ggplot( data = one.data );
+p1 <- p1 + geom_point( aes( plot_X, plot_Y, colour = log10_p_value, size = plot_size), alpha = I(0.6) ) + scale_size_area();
+p1 <- p1 + scale_colour_gradientn( colours = c("blue", "green", "yellow", "red"), limits = c( min(one.data$log10_p_value), 0) );
+p1 <- p1 + geom_point( aes(plot_X, plot_Y, size = plot_size), shape = 21, fill = "transparent", colour = I (alpha ("black", 0.6) )) + scale_size_area();
+p1 <- p1 + scale_size( range=c(5, 30)) + theme_bw(); # + scale_fill_gradientn(colours = heat_hcl(7), limits = c(-300, 0) );
+
+p1 <- p1 + geom_text(aes(plot_X, plot_Y, label = description), colour = I(alpha("black", 0.85)), size = 3 );
+p1 <- p1 + labs (y = "semantic space x", x = "semantic space y");
+p1 <- p1 + theme(legend.key = element_blank()) ;
+one.x_range = max(one.data$plot_X) - min(one.data$plot_X);
+one.y_range = max(one.data$plot_Y) - min(one.data$plot_Y);
+p1 <- p1 + xlim(min(one.data$plot_X)-one.x_range/10,max(one.data$plot_X)+one.x_range/10);
+p1 <- p1 + ylim(min(one.data$plot_Y)-one.y_range/10,max(one.data$plot_Y)+one.y_range/10);
+
+
+
+# --------------------------------------------------------------------------
+# Output the plot to screen
+
+p1 + ggsave('plots/reduced_revigo.pdf', width = 10, height = 7)
+
+# Uncomment the line below to also save the plot to a file.
+# The file type depends on the extension (default=pdf)/revigo-plot.pdf");
+
+```
