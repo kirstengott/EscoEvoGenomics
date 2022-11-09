@@ -1,0 +1,56 @@
+
+```{r}
+library(tidyverse)
+library(ggtree)
+library(ape)
+
+```
+
+
+
+
+```{r}
+orthog      <- read_tsv('tables/Orthogroups.tsv') %>% 
+  select(-GCA_000225605.1_CmilitarisCM01_v01_protein)
+
+source('scripts/working_genomes.R')
+
+```
+
+
+```{r make_ortholog_long, eval=FALSE}
+orthog_long <- orthog %>% gather(genome, genes, -Orthogroup) %>%
+  mutate(genes = strsplit(genes, split = ",")) %>%
+  unnest_longer(genes) %>%
+  mutate(genes= gsub(" ", "", genes)) %>%
+  mutate(acc = sub(".all.maker.proteins", '', genome)) %>%
+  mutate(acc = sub("\\..*$", "", genome)) %>% 
+  filter(!is.na(genes)) %>%
+  group_by(Orthogroup) %>%
+  mutate(n_genomes = length(unique(genome))) %>%
+  ungroup() %>%
+  filter(n_genomes > 1)
+   
+unique(orthog_long$acc ) %in% genomes_keep
+
+dir.create('rdata')
+save(orthog_long, file = 'rdata/orthologues_long.rdata', compress = 'xz')
+```
+
+
+```{r annotate_orthog_long}
+load('rdata/orthologues_long.rdata')
+
+annot <- read_tsv('annotation/all_annotations.txt', col_names = c('acc', 'gene', 'tool', 'annot'))
+
+
+
+orthog_long_annot <- orthog_long %>%
+  rename('gene' = genes) %>%
+  full_join(annot, ., by = c('acc', 'gene'))
+
+save(orthog_long_annot, file = 'rdata/orthologues_long_annot.rdata', compress = 'xz')
+```
+
+
+
