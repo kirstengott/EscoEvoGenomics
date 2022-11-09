@@ -13,52 +13,49 @@ output:
 knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, error = FALSE)
 ```
 
+```{bash, eval = FALSE}
+### stats files were made with agat with the following command
+for i in `ls *gff`
+do
+  agat_sp_statistics.pl -o ${i%.gff}.stats -gff $i
+  cat ${i%.gff}.stats | sed -e"s/ /_/g" | sed -e "s/___*/ /" >${i%.gff}.stats.fix
+done
+```
+
 
 
 ```{r}
 
 library(tidyverse)
 library(cowplot)
+#library(ggpval)
+library("googlesheets4")
 options(scipen=999)
 
 
-
 source('scripts/color_palettes.R')
-metadata <- read_csv('tables/metadata.csv') %>% data.frame()
 
-proteins <- dplyr::filter(metadata, !is.na(n_proteins)) %>%
-  ggplot(aes(x = clade_groups, y = n_proteins, colour = clade_groups)) + 
-  geom_boxplot() + 
-  geom_jitter(alpha = 0.5) +
-  theme_classic() +
-  labs(x = '', 
-       y = 'Number of Genes')  +
-  scale_y_continuous(limits = c(0, max(metadata$n_proteins))) +
-  theme(
-        legend.position = 'none',
-        axis.text.x = element_blank(),
-        axis.ticks.x = element_blank()) +
-  scale_colour_manual(values = clade_colors) + 
-  ggsave('plots/protein_coding_gene_N_boxplot.pdf', width = 3, height = 3)
-proteins
+metadata <- read_sheet("https://docs.google.com/spreadsheets/d/1IUjrth2EOe7UptgUs7lzKCVQk8c79-T5KmAg4tESLHY/edit#gid=0") %>%
+  mutate(across(.cols = c('assembly_length', 'kmer_repeat_length_assemblies_bp', 'kmer_repeat_length_reads_bp'), .fns = function(x){x/1000000}))
 
 
+#metadata <- read_csv('tables/metadata.csv') %>% data.frame() 
 
-proteins <- dplyr::filter(metadata, !is.na(n_proteins)) %>%
-  ggplot(aes(x = clade_groups, y = n_proteins, colour = clade_groups)) + 
-  geom_boxplot() + 
-  geom_jitter(alpha = 0.5) +
-  theme_classic() +
-  labs(x = '', 
-       y = 'Number of Genes')  +
-  scale_y_continuous(limits = c(0, max(metadata$n_proteins))) +
-  theme(
-        legend.position = 'none',
-        axis.text.x = element_blank(),
-        axis.ticks.x = element_blank()) +
-  scale_colour_manual(values = clade_colors) + 
-  ggsave('plots/protein_coding_gene_N_boxplot_tiny.pdf', width = 2.5, height = 2)
-proteins
+gff_f <- list.files('tables/gff_stats', full.names = TRUE, pattern = 'fix')
+
+gff_stats <- lapply(gff_f, function(x){
+  read_delim(x, delim = " ", col_names = c('stat','value')) %>% 
+    mutate(acc = sub("\\..*$", "", basename(x)))
+}) %>% bind_rows() %>% 
+  data.frame(., stringsAsFactors = FALSE) 
+
+
+gff_stats$acc <- unlist(lapply(gff_stats$acc, function(x){
+  metadata[grep(x, metadata$acc), 'acc']
+}))
+
+
+unique(metadata$acc[!metadata$acc %in% gff_stats$acc])
 
 
 
@@ -66,44 +63,84 @@ proteins
 
 
 
-```{r}
+```{r assembly_len}
+data <- metadata %>% filter(!is.na(assembly_length)) %>% select(clade_groups, assembly_length) %>%
+  filter(clade_groups %in% c('Escovopsis', 'Trichoderma'))
+
+
+
+
+
 as_len <- metadata %>% filter(!is.na(assembly_length)) %>%
   ggplot(aes(x = clade_groups, y = assembly_length, colour = clade_groups)) + 
   geom_boxplot() + 
   geom_jitter(alpha = 0.5) +
   theme_classic() +
-  labs(x = '', 
-       y = 'Assembly Length (bp)')  +
+  labs(x = 'Groups', 
+       y = 'Assembly Length (mb)')  +
   scale_y_continuous(limits = c(0, max(metadata$assembly_length))) +
   theme(
-    legend.position = 'none',
-    axis.text.x = element_blank(),
-    axis.ticks.x = element_blank()) +
+    legend.position = 'none') +
   scale_colour_manual(values = clade_colors) 
+
+
+
 
 as_len
 ```
 
-```{r}
-gs_shape_data <- filter(metadata, 
-                        GenomeSizeEstimationStrategy %in% c('FI-PC', 'pacbio'))
-genome_size <- 
-  metadata %>% filter(!is.na(GenomeSize)) %>%
+
+```{r rep_len_assembly}
+rep_len <- metadata %>% 
+  filter(!is.na(kmer_repeat_length_assemblies_bp)) %>%
+  ggplot(aes(x = clade_groups, y = kmer_repeat_length_assemblies_bp, colour = clade_groups)) + 
+  geom_boxplot() + 
+  geom_jitter(alpha = 0.5) +
+  theme_classic() +
+  labs(y = 'Assembly Repeat Length (mb)', x = 'Groups')  +
+  scale_y_continuous(limits = c(0, max(metadata$kmer_repeat_length_assemblies_bp))) +
+  theme(
+    legend.position = 'none') +
+  scale_colour_manual(values = clade_colors) 
+
+rep_len
+
+```
+
+```{r rep_len}
+rep_len2 <- metadata %>% filter(!is.na(kmer_repeat_length_reads_bp)) %>%
+  ggplot(aes(x = clade_groups, y = kmer_repeat_length_reads_bp, colour = clade_groups)) + 
+  geom_boxplot() + 
+  geom_jitter(alpha = 0.5) +
+  theme_classic() +
+  labs(y = 'k-mer Estimated Repeat Length (mb)', x = 'Groups')  +
+  scale_y_continuous(limits = c(0, max(metadata$kmer_repeat_length_reads_bp))) +
+  theme(
+    legend.position = 'none') +
+  scale_colour_manual(values = clade_colors) 
+
+rep_len2
+
+```
+
+
+```{r genome_size}
+
+genome_size <- metadata  %>%
+  mutate(GenomeSize = as.numeric(GenomeSize)) %>%
+  unnest(GenomeSize) %>%
+  filter(!is.na(GenomeSize)) %>%
   ggplot(aes(x = clade_groups, 
              y = GenomeSize, 
              colour = clade_groups)) + 
   geom_boxplot() + 
-  geom_jitter(alpha = 0.5, aes(shape = GenomeSizeEstimationStrategy), size = 3) +
+  geom_jitter(alpha = 0.5) +
   theme_classic() +
   scale_colour_manual(values = clade_colors) +
-  # geom_jitter(data = gs_shape_data, aes(shape = GenomeSizeEstimationStrategy),
-  #             colour = 'black', width = 0.25) +
-  labs(x = '', 
+  labs(x = 'Groups', 
        y = 'Genome Size (mb)') +
-  scale_y_continuous(limits = c(0, max(metadata$GenomeSize))) +
-  theme(
-    axis.text.x = element_blank(),
-    axis.ticks.x = element_blank())
+  scale_y_continuous(limits = c(0, 45))
+
 genome_size
 
 legend <- get_legend(
@@ -128,30 +165,30 @@ meta_out %>%
 ```
 
 
-```{bash, eval = FALSE}
-### stats files were made with agat with the following command
-for i in `ls *gff`
-do
-  agat_sp_statistics.pl -o ${i%.gff}.stats -gff $i
-  cat ${i%.gff}.stats | sed -e"s/ /_/g" | sed -e "s/___*/ /" >${i%.gff}.stats.fix
-done
-```
+
+
+```{r mrna_len}
 
 
 
-```{r}
-gff_f <- list.files('gff_stats', full.names = TRUE, pattern = 'fix')
-gff_stats <- lapply(gff_f, function(x){
-  read_delim(x, delim = " ", col_names = c('stat','value')) %>% 
-    mutate(filename = sub("_genomic", '', sub(".stats.fix", "", basename(x))))
-}) %>% bind_rows() %>% data.frame(., stringsAsFactors = FALSE)
+stats_interest_all <- c("Total_cds_length",
+                        "mean_cds_length", 
+                        'Number_of_intron_in_cds')
 
-gff_stats$acc <- unlist(lapply(gff_stats$filename, function(x){
-  metadata[grep(x, metadata$genome_id), 'acc']
-}))
+gff_stats <- gff_stats %>% 
+  left_join(., metadata, by = 'acc') %>%
+  mutate(across(.cols = c("Total_cds_length", "mean_cds_length", 'Number_of_intron_in_cds'), .fns = function(x){as.numeric(x)/1000000}))
 
 
-gff_stats <- gff_stats %>% left_join(., metadata, by = 'acc')
+
+gff_stats %>% select(stat, value, acc, genus) %>% filter(stat %in% stats_interest_all) %>% distinct() %>%  group_by(genus, acc, stat) %>%
+  summarize(value = mean(value)) %>%
+  ungroup() %>%
+  spread(key = stat, value = value) %>%
+  write_csv(., path = 'tables/supplementary_table_1-1.csv')
+
+
+
 
 stats_interest <- c('Total_mrna_length')
 sub <- gff_stats %>% filter(stat %in% stats_interest)
@@ -163,18 +200,16 @@ mrna_length<- sub %>% filter(stat %in% stats_interest) %>%
   geom_jitter(alpha = 0.5) +
   theme_classic() +
   ylab('Total mRNA Length (bp)') +
-  xlab('')+
+  xlab('Groups')+
   theme(
-    legend.position = 'none',
-    axis.text.x = element_blank(),
-    axis.ticks.x = element_blank()) +
+    legend.position = 'none') +
   scale_colour_manual(values = clade_colors) 
 
 mrna_length
 
 ```
 
-```{r}
+```{r num_introns}
 stats_interest <- c('Number_of_intron_in_cds'
                     )
 
@@ -186,18 +221,16 @@ number_introns <- ggplot(sub, aes(x = clade_groups, y = value, colour = clade_gr
   geom_jitter(alpha = 0.5) +
   theme_classic() +
   ylab('Number of Introns in CDS') +
-  xlab('')+
+  xlab('Groups')+
   theme(
-    legend.position = 'none',
-    axis.text.x = element_blank(),
-    axis.ticks.x = element_blank()) +
+    legend.position = 'none') +
   scale_colour_manual(values = clade_colors)
 number_introns
 ```
 
 
 
-```{r}
+```{r, eval = FALSE}
 stats_interest <- c("Total_intron_length_per_cds")
 sub <- gff_stats %>% filter(stat %in% stats_interest)
 sub$stat <- factor(sub$stat, levels = stats_interest)
@@ -207,11 +240,9 @@ intron_length <- ggplot(sub, aes(x = clade_groups, y = value, colour = clade_gro
   geom_jitter(alpha = 0.5) +
   theme_classic() +
   ylab('Total Intron Length/CDS (bp)') +
-  xlab('')+
+  xlab('Groups')+
   theme(
-    legend.position = 'none',
-    axis.text.x = element_blank(),
-    axis.ticks.x = element_blank()) +
+    legend.position = 'none') +
   scale_colour_manual(values = clade_colors)
 intron_length
 ##source('scripts/make_map.R')
@@ -221,43 +252,40 @@ intron_length
 
 
 
-```{r}
-stats_interest <- c("mean_mrna_length")
+```{r mean_cds}
+stats_interest <- c("mean_cds_length" )
 sub <- gff_stats %>% filter(stat %in% stats_interest)
 sub$stat <- factor(sub$stat, levels = stats_interest)
 
-mean_mrnas <- ggplot(sub, aes(x = clade_groups, y = value, colour = clade_groups)) + 
+mean_cds <- ggplot(sub, aes(x = clade_groups, y = value, colour = clade_groups)) + 
   geom_boxplot() + 
   geom_jitter(alpha = 0.5) +
   theme_classic() +
-  ylab('Mean mRNA Length (bp)') +
-  xlab('')+
+  ylab('Mean CDS Length (bp)') +
+  xlab('Groups')+
   theme(
-    legend.position = 'none',
-    axis.text.x = element_blank(),
-    axis.ticks.x = element_blank()) +
+    legend.position = 'none') +
   scale_colour_manual(values = clade_colors)
-mean_mrnas
+mean_cds
 ##source('scripts/make_map.R')
 ##subplot(map, proteins, proteins, proteins, nrows = 2) 
 ```
 
 
-```{r}
+```{r total_cds}
 stats_interest <- c("Total_cds_length")
-sub <- gff_stats %>% filter(stat %in% stats_interest)
+sub <- gff_stats %>% filter(stat %in% stats_interest) %>%
+  mutate(value = value/1000000)
 sub$stat <- factor(sub$stat, levels = stats_interest)
 
 total_cds <- ggplot(sub, aes(x = clade_groups, y = value, colour = clade_groups)) + 
   geom_boxplot() + 
   geom_jitter(alpha = 0.5) +
   theme_classic() +
-  ylab('Total CDS Length (bp)') +
-  xlab('')+
+  ylab('Total CDS Length (mb)') +
+  xlab('Groups')+
   theme(
-    legend.position = 'none',
-    axis.text.x = element_blank(),
-    axis.ticks.x = element_blank()) +
+    legend.position = 'none') +
   scale_colour_manual(values = clade_colors)
 total_cds
 ##source('scripts/make_map.R')
@@ -268,21 +296,24 @@ total_cds
 
 
 ```{r}
-plot_grid(genome_size, as_len, mrna_length, total_cds, mean_mrnas, number_introns, intron_length, legend, labels = 'AUTO', label_size = 14,
+plot_grid(genome_size, as_len, total_cds, mean_cds, number_introns, rep_len, rep_len2, legend, labels = 'AUTO', label_size = 14,
           nrow = 4, ncol = 2) + 
-  ggsave2(filename = 'plots/supplementary_fig1.pdf', height = 10, width = 10)
-plot_grid(genome_size, as_len, mrna_length, total_cds, mean_mrnas, number_introns, intron_length, legend, labels = 'AUTO', label_size = 14,
+  ggsave2(filename = 'plots/supplementary_fig2.pdf', height = 10, width = 10)
+
+plot_grid(genome_size, as_len, total_cds, mean_cds, number_introns, rep_len, rep_len2, legend, labels = 'AUTO', label_size = 14,
           nrow = 4, ncol = 2) + 
-  ggsave2(filename = 'plots/supplementary_fig1.png', height = 10, width = 10)
+  ggsave2(filename = 'plots/supplementary_fig2.png', height = 10, width = 10)
 ```
 
 ```{r}
 
-stats_interest <- c('Total_mrna_length', "Total_cds_length", 'Number_of_intron_in_cds', 'Number_of_intron_in_cds', "Total_intron_length_per_cds", 'mean_mrna_length')
+stats_interest <- c("Total_cds_length", 'Number_of_intron_in_cds', 'mean_cds_length')
 gff_out <- gff_stats %>% filter(stat %in% stats_interest) %>%
   select(clade_groups, stat,  value) %>%
   group_by(stat, clade_groups) %>%
-  summarize(mean = mean(value)) 
+  summarize(mean = mean(value),
+            min = min(value),
+            max = max(value)) 
 
 gff_out %>%
   knitr::kable(.,)
